@@ -2,16 +2,22 @@ name: Release
 
 on:
   push:
-    tags: ['[0-9]*']
+    # Accept both `v0.1.0` and `0.1.0` tag styles. The version-verify
+    # step normalizes to `0.1.0` and matches against VERSION.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
   contents: write
 
 jobs:
+  # ── CI Gate (must pass before release) ──
   ci:
     name: CI Gate
     uses: ./.github/workflows/ci.yml
 
+  # ── Build + publish release ──
   release:
     name: Build & Release
     needs: [ci]
@@ -21,32 +27,54 @@ jobs:
 
       - name: Verify version
         run: |
+          set -e
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
-          TAG_VERSION="${GITHUB_REF_NAME}"
-          test "$FILE_VERSION" = "$TAG_VERSION" || { echo "VERSION ($FILE_VERSION) != tag ($TAG_VERSION)"; exit 1; }
+          TAG="${GITHUB_REF_NAME#v}"   # strip optional leading 'v'
+          echo "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "tag ($TAG) is not semver x.y.z"; exit 1; }
+          [ "$FILE_VERSION" = "$TAG" ] || {
+            echo "VERSION ($FILE_VERSION) != tag ($TAG)"; exit 1; }
+          echo "Version verified: $TAG"
 
       - name: Install Cyrius toolchain
+        # See ci.yml for the rationale on the post-install smoke test.
         run: |
-          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep 'cyrius *= *"' cyrius.cyml 2>/dev/null | head -1 | sed 's/.*"\(.*\)"/\1/')}"
-          echo "Installing Cyrius $CYRIUS_VERSION"
-          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
-          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
-          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
-          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          set -e
+          export CYRIUS_VERSION="$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)"
+          curl -fsSL --retry 5 --retry-all-errors \
+            "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/install.sh" | sh
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+          "$HOME/.cyrius/bin/cyrius" --version || {
+            echo "FAIL: cyrius toolchain install did not produce a working binary"
+            exit 1
+          }
 
-      - name: Build
+      - name: Build (UEFI Application)
         run: |
-          cyrius deps
           mkdir -p build
-          cyrius build src/main.cyr build/${{ github.event.repository.name }}
+          CYRIUS_TARGET_EFI=1 cyrius build src/main.cyr build/BOOTX64.EFI
+
+      - name: Structural gate
+        run: sh tests/verify_pe.sh
+
+      - name: Stage release artifacts
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME#v}"
+          mkdir -p release
+          cp build/BOOTX64.EFI "release/BOOTX64.EFI"
+          # Also publish a versioned name so multiple releases can
+          # coexist as raw downloads if linked directly.
+          cp build/BOOTX64.EFI "release/gnoboot-${TAG}-x86_64-efi.efi"
+          (cd release && sha256sum BOOTX64.EFI gnoboot-${TAG}-x86_64-efi.efi > SHA256SUMS)
+          ls -la release/
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: build/*
+          files: |
+            release/BOOTX64.EFI
+            release/gnoboot-*-x86_64-efi.efi
+            release/SHA256SUMS

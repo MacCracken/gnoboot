@@ -23,15 +23,33 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EFI="${1:-$ROOT/build/BOOTX64.EFI}"
 EXPECT="${EXPECT:-gnoboot v0.1.0}"
-OVMF_CODE="/usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd"
-OVMF_VARS_SRC="/usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd"
+
+# OVMF firmware paths differ between distros — probe both common
+# locations. Arch: edk2-ovmf installs to /usr/share/edk2-ovmf/x64/
+# with `.4m.fd` suffix. Ubuntu: ovmf installs to /usr/share/OVMF/
+# without the `.4m.fd` suffix. First match wins.
+OVMF_CODE=""
+OVMF_VARS_SRC=""
+for c in \
+    /usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd \
+    /usr/share/OVMF/OVMF_CODE.fd \
+    /usr/share/qemu/OVMF.fd \
+    ; do
+    if [ -f "$c" ]; then OVMF_CODE="$c"; break; fi
+done
+for v in \
+    /usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd \
+    /usr/share/OVMF/OVMF_VARS.fd \
+    ; do
+    if [ -f "$v" ]; then OVMF_VARS_SRC="$v"; break; fi
+done
 
 # Tooling probes — graceful SKIP shape mirrors cyrius check.sh.
 for tool in qemu-system-x86_64 parted mformat mmd mcopy; do
     command -v "$tool" >/dev/null 2>&1 || { echo "SKIP: $tool not in PATH"; exit 0; }
 done
-[ -f "$OVMF_CODE" ] || { echo "SKIP: $OVMF_CODE not found"; exit 0; }
-[ -f "$OVMF_VARS_SRC" ] || { echo "SKIP: $OVMF_VARS_SRC not found"; exit 0; }
+[ -n "$OVMF_CODE" ]     || { echo "SKIP: OVMF_CODE.fd not found (tried Arch + Ubuntu paths)"; exit 0; }
+[ -n "$OVMF_VARS_SRC" ] || { echo "SKIP: OVMF_VARS.fd not found"; exit 0; }
 [ -f "$EFI" ] || { echo "ERROR: $EFI not found — run \`CYRIUS_TARGET_EFI=1 cyrius build src/main.cyr build/BOOTX64.EFI\` first" >&2; exit 1; }
 
 D=$(mktemp -d -t gnoboot-smoke.XXXXXX)
