@@ -1,76 +1,208 @@
-# gnoboot — Step 4a probe (minimal): test cyrius global capture +
-# firmware-RDX survival across cyrius prep code.
+# gnoboot — Step 4: pure-asm `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &out)`.
 #
-# Tests two things:
-#   (1) `var p = &system_table;` at top level of kernel; mode
-#       loads &system_table into RAX (per the agnos Path A shim's
-#       mb_info_ptr capture pattern), with the address resolved
-#       via a DIR64 base relocation (cyrius 5.11.49 emits .reloc
-#       under CYRIUS_TARGET_EFI=1).
-#   (2) Firmware's RDX (SystemTable*) survives cyrius's prologue +
-#       the `var p = &foo` statement, so we can stash it into the
-#       global with raw `mov [rax], rdx`.
+# **Why pure asm.** Step 4 first attempt used cyrius's
+# `var p = &global; asm { mov [rax], rcx }` idiom — works inside a fn
+# (per agnos's Path A shim) but NOT at top-level kernel; mode, because
+# top-level `var X = expr;` is treated as a global-with-deferred-init,
+# not a local. Cyrius emits the asm BEFORE the var initializer, so RAX
+# is whatever firmware entry left it. Result: every capture clobbered
+# random memory and the HandleProtocol call got SystemTable* instead of
+# ImageHandle.
 #
-# Banner emission stays inline-asm (same shape as Step 3) so the only
-# new mechanism under test is the global-capture sequence at the top.
-# If we see "step 4a probe ok" on ConOut, BOTH unknowns are resolved.
+# Workaround until we move to a fn-based architecture: drop all cyrius
+# statements at top level. One inline-asm block. RCX/RDX captured into
+# callee-saved RBX/R12 immediately after the cyrius prologue. UEFI's
+# OUT parameter (which needs writable storage) lives on the stack —
+# we `push 0` to allocate a writable u64 slot at [rsp+0]. UTF-16LE
+# strings and the LoadedImage GUID are embedded as `db`-style bytes
+# inside the asm block, addressed via `lea rdx, [rip + disp32]`.
 #
-# Expected output on QEMU OVMF ConOut: "step 4a probe ok\r\n"
+# **What success looks like.** UEFI ConOut shows:
+#   step 4: HandleProtocol(LoadedImage) = ok
+# (LoadedImage is always installed on the image gnoboot was loaded
+# from — UEFI spec § 9 — so this is the right call to bring up the
+# trampoline. The OUT param ends up holding a non-NULL pointer we
+# could dereference for the DeviceHandle in Step 4b.)
+#
+# **Cycle accounting (CHANGELOG-worthy).** This file is the second
+# Step 4 attempt; the first (cyrius+asm interleaved) failed because of
+# the top-level reordering described above. Constraint logged.
 
 kernel;
 
-# Uninitialized — no EMIT_GVAR_INITS, no register clobber at startup.
-# Stores the SystemTable* pointer captured from firmware's RDX.
-var system_table[8];
-
-# Cyrius emits: lea rax, [rip + DIR64_reloc_to_system_table]
-# Side-effect: RAX = &system_table, RDX preserved (only RAX touched).
-var p = &system_table;
 asm {
-    # mov [rax], rdx   ; stash SystemTable* into the global
-    0x48; 0x89; 0x10;
-}
+    # ============================================================
+    # Prologue — capture firmware args + allocate OUT slot.
+    # Entry state: rcx = ImageHandle, rdx = SystemTable*, rsp ≡ 8 (mod 16)
+    # ============================================================
 
-# At this point: system_table global holds SystemTable*, RDX still
-# holds SystemTable* (we didn't clobber it). RCX may or may not still
-# hold ImageHandle — irrelevant for the print, we walk via RDX.
-asm {
-    # mov rcx, [rdx + 0x40]   ; ConOut = SystemTable->ConOut
-    0x48; 0x8B; 0x4A; 0x40;
+    # push rcx                ; [rsp_after_3_pushes + 16] = ImageHandle
+    0x51;
+    # push rdx                ; [rsp_after_3_pushes + 8]  = SystemTable*
+    0x52;
+    # push 0                  ; [rsp_after_3_pushes + 0]  = OUT slot (writable u64)
+    0x6A; 0x00;
+    # rsp now -24 from entry; rsp ≡ 0 (mod 16) — re-aligned for firmware calls.
+
+    # mov rbx, [rsp + 16]     ; rbx = ImageHandle (callee-saved in MS x64 and SysV)
+    0x48; 0x8B; 0x5C; 0x24; 0x10;
+    # mov r12, [rsp + 8]      ; r12 = SystemTable*  (callee-saved too)
+    0x4C; 0x8B; 0x64; 0x24; 0x08;
+
+    # ============================================================
+    # Print banner: OutputString(ConOut, &banner)
+    # ============================================================
+
+    # mov rcx, [r12 + 0x40]   ; ConOut = SystemTable->ConOut
+    0x49; 0x8B; 0x4C; 0x24; 0x40;
     # mov rax, [rcx + 0x08]   ; OutputString fn ptr
     0x48; 0x8B; 0x41; 0x08;
-    # lea rdx, [rip + 0x0E]   ; rdx = &banner (14 bytes after end-of-LEA)
-    0x48; 0x8D; 0x15; 0x0E; 0x00; 0x00; 0x00;
-    # sub rsp, 0x28           ; MS x64 shadow + 16-byte align
+    # lea rdx, [rip + 0x70]   ; &banner  (this LEA ends at asm-offset 30; banner @ 142; disp = 112 = 0x70)
+    0x48; 0x8D; 0x15; 0x70; 0x00; 0x00; 0x00;
+    # sub rsp, 0x28
     0x48; 0x83; 0xEC; 0x28;
-    # call rax                ; OutputString(rcx=ConOut, rdx=banner)
+    # call rax
     0xFF; 0xD0;
     # add rsp, 0x28
     0x48; 0x83; 0xC4; 0x28;
-    # xor eax, eax            ; EFI_SUCCESS
+
+    # ============================================================
+    # HandleProtocol(ImageHandle, &LoadedImageGuid, &OUT@[rsp+0])
+    # ============================================================
+
+    # mov rcx, rbx                                 ; arg 0 = ImageHandle
+    0x48; 0x89; 0xD9;
+    # lea rdx, [rip + 0xAA]                       ; &li_guid  (LEA ends at 50; li_guid @ 220; disp = 170 = 0xAA)
+    0x48; 0x8D; 0x15; 0xAA; 0x00; 0x00; 0x00;
+    # lea r8, [rsp]                                ; arg 2 = &OUT slot on stack
+    0x4C; 0x8D; 0x04; 0x24;
+    # mov rax, [r12 + 0x60]                        ; BootServices
+    0x49; 0x8B; 0x44; 0x24; 0x60;
+    # mov rax, [rax + 0x98]                        ; BootServices->HandleProtocol
+    0x48; 0x8B; 0x80; 0x98; 0x00; 0x00; 0x00;
+    # sub rsp, 0x28
+    0x48; 0x83; 0xEC; 0x28;
+    # call rax
+    0xFF; 0xD0;
+    # add rsp, 0x28
+    0x48; 0x83; 0xC4; 0x28;
+    # rax = EFI_STATUS
+
+    # ============================================================
+    # Branch on EFI_STATUS, print "ok" or "FAIL" accordingly.
+    # ============================================================
+
+    # test rax, rax
+    0x48; 0x85; 0xC0;
+    # jne fail_label          ; 2-byte short; jne ends at 81, fail @ 109; disp = 28 = 0x1C
+    0x75; 0x1C;
+
+    # --- ok branch ---
+    # mov rcx, [r12 + 0x40]
+    0x49; 0x8B; 0x4C; 0x24; 0x40;
+    # mov rax, [rcx + 0x08]
+    0x48; 0x8B; 0x41; 0x08;
+    # lea rdx, [rip + 0x8B]   ; &msg_ok   (LEA ends at 97; msg_ok @ 236; disp = 139 = 0x8B)
+    0x48; 0x8D; 0x15; 0x8B; 0x00; 0x00; 0x00;
+    # sub rsp, 0x28
+    0x48; 0x83; 0xEC; 0x28;
+    # call rax
+    0xFF; 0xD0;
+    # add rsp, 0x28
+    0x48; 0x83; 0xC4; 0x28;
+    # jmp end_label           ; 2-byte short; jmp ends at 109, end @ 135; disp = 26 = 0x1A
+    0xEB; 0x1A;
+
+    # --- fail branch (lands here from `jne` above) ---
+    # mov rcx, [r12 + 0x40]
+    0x49; 0x8B; 0x4C; 0x24; 0x40;
+    # mov rax, [rcx + 0x08]
+    0x48; 0x8B; 0x41; 0x08;
+    # lea rdx, [rip + 0x79]   ; &msg_fail  (LEA ends at 125; msg_fail @ 246; disp = 121 = 0x79)
+    0x48; 0x8D; 0x15; 0x79; 0x00; 0x00; 0x00;
+    # sub rsp, 0x28
+    0x48; 0x83; 0xEC; 0x28;
+    # call rax
+    0xFF; 0xD0;
+    # add rsp, 0x28
+    0x48; 0x83; 0xC4; 0x28;
+
+    # --- end_label ---
+    # xor eax, eax            ; EFI_SUCCESS regardless of which path we took
     0x31; 0xC0;
+    # add rsp, 24             ; pop our 3 stack values
+    0x48; 0x83; 0xC4; 0x18;
     # ret                     ; back to firmware
     0xC3;
-    # nop (align banner to 2-byte CHAR16)
-    0x90;
-    # banner: UTF-16LE "step 4a probe ok\r\n\0" (36 bytes, 18 CHAR16 units)
-    0x73; 0x00;   # 's'
-    0x74; 0x00;   # 't'
-    0x65; 0x00;   # 'e'
-    0x70; 0x00;   # 'p'
-    0x20; 0x00;   # ' '
-    0x34; 0x00;   # '4'
-    0x61; 0x00;   # 'a'
-    0x20; 0x00;   # ' '
-    0x70; 0x00;   # 'p'
-    0x72; 0x00;   # 'r'
-    0x6F; 0x00;   # 'o'
-    0x62; 0x00;   # 'b'
-    0x65; 0x00;   # 'e'
-    0x20; 0x00;   # ' '
-    0x6F; 0x00;   # 'o'
-    0x6B; 0x00;   # 'k'
-    0x0D; 0x00;   # '\r'
-    0x0A; 0x00;   # '\n'
-    0x00; 0x00;   # '\0' terminator
+
+    # ============================================================
+    # Embedded data (rip-addressed from LEAs above).
+    # Banner offset target: this byte (immediately after RET).
+    # ============================================================
+
+    # banner: UTF-16LE "step 4: HandleProtocol(LoadedImage) = \0"
+    #         (38 chars × 2 + 2 NUL = 78 bytes)
+    0x73; 0x00;   # s
+    0x74; 0x00;   # t
+    0x65; 0x00;   # e
+    0x70; 0x00;   # p
+    0x20; 0x00;   # SP
+    0x34; 0x00;   # 4
+    0x3A; 0x00;   # :
+    0x20; 0x00;   # SP
+    0x48; 0x00;   # H
+    0x61; 0x00;   # a
+    0x6E; 0x00;   # n
+    0x64; 0x00;   # d
+    0x6C; 0x00;   # l
+    0x65; 0x00;   # e
+    0x50; 0x00;   # P
+    0x72; 0x00;   # r
+    0x6F; 0x00;   # o
+    0x74; 0x00;   # t
+    0x6F; 0x00;   # o
+    0x63; 0x00;   # c
+    0x6F; 0x00;   # o
+    0x6C; 0x00;   # l
+    0x28; 0x00;   # (
+    0x4C; 0x00;   # L
+    0x6F; 0x00;   # o
+    0x61; 0x00;   # a
+    0x64; 0x00;   # d
+    0x65; 0x00;   # e
+    0x64; 0x00;   # d
+    0x49; 0x00;   # I
+    0x6D; 0x00;   # m
+    0x61; 0x00;   # a
+    0x67; 0x00;   # g
+    0x65; 0x00;   # e
+    0x29; 0x00;   # )
+    0x20; 0x00;   # SP
+    0x3D; 0x00;   # =
+    0x20; 0x00;   # SP
+    0x00; 0x00;   # NUL terminator (CHAR16)
+
+    # li_guid: EFI_LOADED_IMAGE_PROTOCOL_GUID
+    #   5B1B31A1-9562-11D2-8E3F-00A0C969723B
+    #   wire format: u32 LE | u16 LE | u16 LE | 8 raw bytes
+    0xA1; 0x31; 0x1B; 0x5B;
+    0x62; 0x95;
+    0xD2; 0x11;
+    0x8E; 0x3F; 0x00; 0xA0; 0xC9; 0x69; 0x72; 0x3B;
+
+    # msg_ok: UTF-16LE "ok\r\n\0"
+    0x6F; 0x00;   # o
+    0x6B; 0x00;   # k
+    0x0D; 0x00;   # \r
+    0x0A; 0x00;   # \n
+    0x00; 0x00;   # NUL
+
+    # msg_fail: UTF-16LE "FAIL\r\n\0"
+    0x46; 0x00;   # F
+    0x41; 0x00;   # A
+    0x49; 0x00;   # I
+    0x4C; 0x00;   # L
+    0x0D; 0x00;   # \r
+    0x0A; 0x00;   # \n
+    0x00; 0x00;   # NUL
 }
