@@ -10,7 +10,11 @@ cyrius = "5.11.49"
 entry = "src/main.cyr"
 test = "src/test.cyr"
 output = "BOOTX64.EFI"
-target = "efi"
+# UEFI Application emit is selected via the CYRIUS_TARGET_EFI=1
+# environment variable (per cyrius 5.11.49). gnoboot's wrapper
+# (Makefile / build script / tests/ovmf_smoke.sh) sets that
+# before invoking `cyrius build`. No corresponding cyrius.cyml
+# field yet — flag-driven.
 
 [deps]
 stdlib = []
