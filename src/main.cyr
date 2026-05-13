@@ -1,208 +1,121 @@
-# gnoboot — Step 4: pure-asm `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &out)`.
+# gnoboot Step 4 — fn-based architecture, verified.
 #
-# **Why pure asm.** Step 4 first attempt used cyrius's
-# `var p = &global; asm { mov [rax], rcx }` idiom — works inside a fn
-# (per agnos's Path A shim) but NOT at top-level kernel; mode, because
-# top-level `var X = expr;` is treated as a global-with-deferred-init,
-# not a local. Cyrius emits the asm BEFORE the var initializer, so RAX
-# is whatever firmware entry left it. Result: every capture clobbered
-# random memory and the HandleProtocol call got SystemTable* instead of
-# ImageHandle.
+# Entry trampoline pattern (proven on QEMU OVMF 2026-05-13):
+#   asm { mov r14, rcx; mov r15, rdx }   ; capture firmware args to callee-saved
+#   var fp = &efi_main;                   ; cyrius: rax = &efi_main
+#   asm { mov rcx, r14; mov rdx, r15; call rax }   ; MS x64 call into the fn
 #
-# Workaround until we move to a fn-based architecture: drop all cyrius
-# statements at top level. One inline-asm block. RCX/RDX captured into
-# callee-saved RBX/R12 immediately after the cyrius prologue. UEFI's
-# OUT parameter (which needs writable storage) lives on the stack —
-# we `push 0` to allocate a writable u64 slot at [rsp+0]. UTF-16LE
-# strings and the LoadedImage GUID are embedded as `db`-style bytes
-# inside the asm block, addressed via `lea rdx, [rip + disp32]`.
+# *Cyrius's internal fn-call ABI under CYRIUS_TARGET_EFI is MS x64*,
+# not SysV (verified via objdump — callee's prologue stores rcx/rdx,
+# not rdi/rsi). This contradicts the lib/fnptr.cyr comment which
+# documents SysV — surfaced upstream in
+# cyrius/docs/development/issues/2026-05-13-gnoboot-efi-main-convention.md.
 #
-# **What success looks like.** UEFI ConOut shows:
-#   step 4: HandleProtocol(LoadedImage) = ok
-# (LoadedImage is always installed on the image gnoboot was loaded
-# from — UEFI spec § 9 — so this is the right call to bring up the
-# trampoline. The OUT param ends up holding a non-NULL pointer we
-# could dereference for the DeviceHandle in Step 4b.)
+# The trampoline could be folded into cyrius itself if/when the
+# `fn efi_main(handle, st)` convention proposal lands; until then we
+# carry the ~15 lines of asm here.
 #
-# **Cycle accounting (CHANGELOG-worthy).** This file is the second
-# Step 4 attempt; the first (cyrius+asm interleaved) failed because of
-# the top-level reordering described above. Constraint logged.
+# Expected ConOut output on success: "fn entry works"
 
 kernel;
 
+# UTF-16LE buffer — populated by top-level store8 calls below
+var msg[34];
+
+# Marshal globals for the firmware-call trampoline inside print_msg
+var marshal_a0[8];
+var marshal_fp[8];
+
+
+# === fn body ============================================================
+
+fn print_msg(handle, st) {
+    # SysV ABI on the way in: rdi = handle, rsi = st (after the top-level
+    # asm's translation from MS x64).
+    var con_out = load64(st + 0x40);
+    var out_str = load64(con_out + 0x08);
+
+    # The agnos-shim pattern (var p = &g; asm { mov [rax], ... }) is
+    # documented to work INSIDE a fn body — let's exercise it.
+    store64(&marshal_a0, con_out);
+    store64(&marshal_fp, out_str);
+
+    var pmsg = &msg;
+    asm {
+        # rax = &msg (from the cyrius lea above). Move to rdx for MS x64 arg 1.
+        0x48; 0x89; 0xC2;          # mov rdx, rax
+    }
+
+    var pa0 = &marshal_a0;
+    asm {
+        # rax = &marshal_a0. Load *rax = con_out into rcx (MS x64 arg 0).
+        0x48; 0x8B; 0x08;          # mov rcx, [rax]
+    }
+
+    var pfp = &marshal_fp;
+    asm {
+        # rax = &marshal_fp. Load *rax = out_str into rax (call target).
+        0x48; 0x8B; 0x00;          # mov rax, [rax]
+        # sub rsp, 0x28; call rax; add rsp, 0x28  (MS x64 shadow + align)
+        0x48; 0x83; 0xEC; 0x28;
+        0xFF; 0xD0;
+        0x48; 0x83; 0xC4; 0x28;
+    }
+    return 0;
+}
+
+
+# === Top-level entry ====================================================
+
+# Build msg = UTF-16LE "fn entry works\r\n\0" (32 bytes data + 2 NUL = 34)
+store8(&msg +  0, 0x66); store8(&msg +  1, 0x00);  # f
+store8(&msg +  2, 0x6E); store8(&msg +  3, 0x00);  # n
+store8(&msg +  4, 0x20); store8(&msg +  5, 0x00);  # SP
+store8(&msg +  6, 0x65); store8(&msg +  7, 0x00);  # e
+store8(&msg +  8, 0x6E); store8(&msg +  9, 0x00);  # n
+store8(&msg + 10, 0x74); store8(&msg + 11, 0x00);  # t
+store8(&msg + 12, 0x72); store8(&msg + 13, 0x00);  # r
+store8(&msg + 14, 0x79); store8(&msg + 15, 0x00);  # y
+store8(&msg + 16, 0x20); store8(&msg + 17, 0x00);  # SP
+store8(&msg + 18, 0x77); store8(&msg + 19, 0x00);  # w
+store8(&msg + 20, 0x6F); store8(&msg + 21, 0x00);  # o
+store8(&msg + 22, 0x72); store8(&msg + 23, 0x00);  # r
+store8(&msg + 24, 0x6B); store8(&msg + 25, 0x00);  # k
+store8(&msg + 26, 0x73); store8(&msg + 27, 0x00);  # s
+store8(&msg + 28, 0x0D); store8(&msg + 29, 0x00);  # \r
+store8(&msg + 30, 0x0A); store8(&msg + 31, 0x00);  # \n
+
+# Capture firmware args to callee-saved regs (preserved across cyrius
+# internal calls in BOTH SysV and MS x64).
 asm {
-    # ============================================================
-    # Prologue — capture firmware args + allocate OUT slot.
-    # Entry state: rcx = ImageHandle, rdx = SystemTable*, rsp ≡ 8 (mod 16)
-    # ============================================================
+    # mov r14, rcx     ; ImageHandle
+    0x49; 0x89; 0xCE;
+    # mov r15, rdx     ; SystemTable*
+    0x49; 0x89; 0xD7;
+}
 
-    # push rcx                ; [rsp_after_3_pushes + 16] = ImageHandle
-    0x51;
-    # push rdx                ; [rsp_after_3_pushes + 8]  = SystemTable*
-    0x52;
-    # push 0                  ; [rsp_after_3_pushes + 0]  = OUT slot (writable u64)
-    0x6A; 0x00;
-    # rsp now -24 from entry; rsp ≡ 0 (mod 16) — re-aligned for firmware calls.
+# Get the cyrius fn pointer. Under the observed kmode emit-order, the
+# `var p = &foo;` init code emits *between* this statement and the next
+# asm block — so the next asm starts with `rax = &print_msg`.
+var fp = &print_msg;
 
-    # mov rbx, [rsp + 16]     ; rbx = ImageHandle (callee-saved in MS x64 and SysV)
-    0x48; 0x8B; 0x5C; 0x24; 0x10;
-    # mov r12, [rsp + 8]      ; r12 = SystemTable*  (callee-saved too)
-    0x4C; 0x8B; 0x64; 0x24; 0x08;
-
-    # ============================================================
-    # Print banner: OutputString(ConOut, &banner)
-    # ============================================================
-
-    # mov rcx, [r12 + 0x40]   ; ConOut = SystemTable->ConOut
-    0x49; 0x8B; 0x4C; 0x24; 0x40;
-    # mov rax, [rcx + 0x08]   ; OutputString fn ptr
-    0x48; 0x8B; 0x41; 0x08;
-    # lea rdx, [rip + 0x70]   ; &banner  (this LEA ends at asm-offset 30; banner @ 142; disp = 112 = 0x70)
-    0x48; 0x8D; 0x15; 0x70; 0x00; 0x00; 0x00;
-    # sub rsp, 0x28
-    0x48; 0x83; 0xEC; 0x28;
-    # call rax
+# Pass firmware args to print_msg using MS x64 ABI (cyrius's internal
+# call convention under CYRIUS_TARGET_EFI; see file header).
+asm {
+    # mov rcx, r14   ; arg 0 = ImageHandle
+    0x4C; 0x89; 0xF1;
+    # mov rdx, r15   ; arg 1 = SystemTable*
+    0x4C; 0x89; 0xFA;
+    # The entry into our binary was via `call` (firmware pushed a return
+    # address). After two `mov`s rsp is still 8 mod 16. We need 0 mod 16
+    # before our internal `call rax`, so sub rsp, 8.
+    0x48; 0x83; 0xEC; 0x08;
+    # call rax    ; print_msg(rcx=ImageHandle, rdx=SystemTable)
     0xFF; 0xD0;
-    # add rsp, 0x28
-    0x48; 0x83; 0xC4; 0x28;
-
-    # ============================================================
-    # HandleProtocol(ImageHandle, &LoadedImageGuid, &OUT@[rsp+0])
-    # ============================================================
-
-    # mov rcx, rbx                                 ; arg 0 = ImageHandle
-    0x48; 0x89; 0xD9;
-    # lea rdx, [rip + 0xAA]                       ; &li_guid  (LEA ends at 50; li_guid @ 220; disp = 170 = 0xAA)
-    0x48; 0x8D; 0x15; 0xAA; 0x00; 0x00; 0x00;
-    # lea r8, [rsp]                                ; arg 2 = &OUT slot on stack
-    0x4C; 0x8D; 0x04; 0x24;
-    # mov rax, [r12 + 0x60]                        ; BootServices
-    0x49; 0x8B; 0x44; 0x24; 0x60;
-    # mov rax, [rax + 0x98]                        ; BootServices->HandleProtocol
-    0x48; 0x8B; 0x80; 0x98; 0x00; 0x00; 0x00;
-    # sub rsp, 0x28
-    0x48; 0x83; 0xEC; 0x28;
-    # call rax
-    0xFF; 0xD0;
-    # add rsp, 0x28
-    0x48; 0x83; 0xC4; 0x28;
-    # rax = EFI_STATUS
-
-    # ============================================================
-    # Branch on EFI_STATUS, print "ok" or "FAIL" accordingly.
-    # ============================================================
-
-    # test rax, rax
-    0x48; 0x85; 0xC0;
-    # jne fail_label          ; 2-byte short; jne ends at 81, fail @ 109; disp = 28 = 0x1C
-    0x75; 0x1C;
-
-    # --- ok branch ---
-    # mov rcx, [r12 + 0x40]
-    0x49; 0x8B; 0x4C; 0x24; 0x40;
-    # mov rax, [rcx + 0x08]
-    0x48; 0x8B; 0x41; 0x08;
-    # lea rdx, [rip + 0x8B]   ; &msg_ok   (LEA ends at 97; msg_ok @ 236; disp = 139 = 0x8B)
-    0x48; 0x8D; 0x15; 0x8B; 0x00; 0x00; 0x00;
-    # sub rsp, 0x28
-    0x48; 0x83; 0xEC; 0x28;
-    # call rax
-    0xFF; 0xD0;
-    # add rsp, 0x28
-    0x48; 0x83; 0xC4; 0x28;
-    # jmp end_label           ; 2-byte short; jmp ends at 109, end @ 135; disp = 26 = 0x1A
-    0xEB; 0x1A;
-
-    # --- fail branch (lands here from `jne` above) ---
-    # mov rcx, [r12 + 0x40]
-    0x49; 0x8B; 0x4C; 0x24; 0x40;
-    # mov rax, [rcx + 0x08]
-    0x48; 0x8B; 0x41; 0x08;
-    # lea rdx, [rip + 0x79]   ; &msg_fail  (LEA ends at 125; msg_fail @ 246; disp = 121 = 0x79)
-    0x48; 0x8D; 0x15; 0x79; 0x00; 0x00; 0x00;
-    # sub rsp, 0x28
-    0x48; 0x83; 0xEC; 0x28;
-    # call rax
-    0xFF; 0xD0;
-    # add rsp, 0x28
-    0x48; 0x83; 0xC4; 0x28;
-
-    # --- end_label ---
-    # xor eax, eax            ; EFI_SUCCESS regardless of which path we took
+    # add rsp, 8
+    0x48; 0x83; 0xC4; 0x08;
+    # xor eax, eax        ; EFI_SUCCESS
     0x31; 0xC0;
-    # add rsp, 24             ; pop our 3 stack values
-    0x48; 0x83; 0xC4; 0x18;
-    # ret                     ; back to firmware
+    # ret                 ; back to firmware
     0xC3;
-
-    # ============================================================
-    # Embedded data (rip-addressed from LEAs above).
-    # Banner offset target: this byte (immediately after RET).
-    # ============================================================
-
-    # banner: UTF-16LE "step 4: HandleProtocol(LoadedImage) = \0"
-    #         (38 chars × 2 + 2 NUL = 78 bytes)
-    0x73; 0x00;   # s
-    0x74; 0x00;   # t
-    0x65; 0x00;   # e
-    0x70; 0x00;   # p
-    0x20; 0x00;   # SP
-    0x34; 0x00;   # 4
-    0x3A; 0x00;   # :
-    0x20; 0x00;   # SP
-    0x48; 0x00;   # H
-    0x61; 0x00;   # a
-    0x6E; 0x00;   # n
-    0x64; 0x00;   # d
-    0x6C; 0x00;   # l
-    0x65; 0x00;   # e
-    0x50; 0x00;   # P
-    0x72; 0x00;   # r
-    0x6F; 0x00;   # o
-    0x74; 0x00;   # t
-    0x6F; 0x00;   # o
-    0x63; 0x00;   # c
-    0x6F; 0x00;   # o
-    0x6C; 0x00;   # l
-    0x28; 0x00;   # (
-    0x4C; 0x00;   # L
-    0x6F; 0x00;   # o
-    0x61; 0x00;   # a
-    0x64; 0x00;   # d
-    0x65; 0x00;   # e
-    0x64; 0x00;   # d
-    0x49; 0x00;   # I
-    0x6D; 0x00;   # m
-    0x61; 0x00;   # a
-    0x67; 0x00;   # g
-    0x65; 0x00;   # e
-    0x29; 0x00;   # )
-    0x20; 0x00;   # SP
-    0x3D; 0x00;   # =
-    0x20; 0x00;   # SP
-    0x00; 0x00;   # NUL terminator (CHAR16)
-
-    # li_guid: EFI_LOADED_IMAGE_PROTOCOL_GUID
-    #   5B1B31A1-9562-11D2-8E3F-00A0C969723B
-    #   wire format: u32 LE | u16 LE | u16 LE | 8 raw bytes
-    0xA1; 0x31; 0x1B; 0x5B;
-    0x62; 0x95;
-    0xD2; 0x11;
-    0x8E; 0x3F; 0x00; 0xA0; 0xC9; 0x69; 0x72; 0x3B;
-
-    # msg_ok: UTF-16LE "ok\r\n\0"
-    0x6F; 0x00;   # o
-    0x6B; 0x00;   # k
-    0x0D; 0x00;   # \r
-    0x0A; 0x00;   # \n
-    0x00; 0x00;   # NUL
-
-    # msg_fail: UTF-16LE "FAIL\r\n\0"
-    0x46; 0x00;   # F
-    0x41; 0x00;   # A
-    0x49; 0x00;   # I
-    0x4C; 0x00;   # L
-    0x0D; 0x00;   # \r
-    0x0A; 0x00;   # \n
-    0x00; 0x00;   # NUL
 }

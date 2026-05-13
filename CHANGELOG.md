@@ -76,31 +76,65 @@ on the NUC AMD. v0.1.0 will not be tagged until both gates pass.
 
 ### Known cyrius constraints (informed Step 4 design)
 
+These are ergonomic gaps in `CYRIUS_TARGET_EFI` mode, not bugs.
+gnoboot ships fine without resolution. Both surfaced upstream:
+
 - **No array-with-initializer syntax** — `var foo[N] = { 0x.., 0x.. };`
-  is rejected with `expected ';', got '='`. Cyrius supports
+  rejected with `expected ';', got '='`. Cyrius supports
   `var s = "ascii";` for ASCII strings but not byte-array literals.
-  Pattern for UTF-16LE buffers (UEFI CHAR16*): declare uninitialized
-  `var buf[N];` and `store8(&buf + i, byte)` at runtime *inside a fn*,
-  OR embed the bytes inline in an `asm { ... }` block and reference
-  via `lea rdx, [rip + N]`.
-- **Cyrius internal ABI is SysV (RDI/RSI/RDX/RCX/R8/R9)**, even
-  under `_TARGET_PE` / `_TARGET_EFI_APPLICATION`. The MS x64 ABI
-  work is only for the entry boundary. Calls to firmware function
-  pointers (UEFI's MS x64 ABI: RCX/RDX/R8/R9 + 32-byte shadow space
-  + 16-byte stack alignment) need an inline-asm trampoline at every
-  firmware-call site. Source: `cyrius/lib/fnptr.cyr` comment block.
-- **At top-level `kernel;` mode, `var X = expr;` is a global with
-  deferred initializer**, not a local — cyrius emits intervening
-  `asm` blocks BEFORE the `&expr` lea, so the agnos shim's
-  `var p = &foo; asm { mov [rax], ... }` register-capture pattern
-  DOES NOT WORK at top level. (Caught the hard way: Step 4a "passed"
-  but the capture was a no-op; the OK print was firmware-RDX-direct.
-  Step 4's first attempt with the same pattern got
-  `HandleProtocol = FAIL` because the handle global got garbage.)
-  Workarounds: (a) move the capture into a fn body — then `var p`
-  is a real local and the pattern works; (b) keep everything in one
-  pure-asm block at top level and use the stack for writable scratch
-  (current Step 4 shape).
+  Pattern for UTF-16LE buffers (UEFI CHAR16*) and EFI GUIDs:
+  declare uninitialized `var buf[N];` and `store8(&buf + i, byte)`
+  at runtime *inside a fn body*, OR embed the bytes inline in an
+  `asm { ... }` block and reference via `lea rdx, [rip + N]`.
+  *Filed upstream:* `cyrius/docs/development/issues/2026-05-13-gnoboot-byte-array-literal.md`.
+- **Cyrius internal fn-call ABI under `_TARGET_EFI_APPLICATION` is
+  MS x64**, not SysV. Verified via objdump: callee prologue saves
+  RCX/RDX (not RDI/RSI) into local slots. This contradicts
+  `cyrius/lib/fnptr.cyr`'s comment which documents SysV — that doc
+  predates the TARGET_EFI work and is no longer accurate for this
+  target. fncallN's asm doesn't have a TARGET_EFI branch either.
+  *Filed upstream as part of:* `cyrius/docs/development/issues/2026-05-13-gnoboot-efi-main-convention.md`.
+- **No `fn efi_main(handle, st)` entry convention.** Cyrius has the
+  `fn main(); var r = main(); syscall(SYS_EXIT, r);` Linux/macOS
+  pattern but no UEFI equivalent. Consumer hand-rolls a ~15-line
+  asm trampoline (capture RCX/RDX → callee-saved R14/R15, get fn
+  ptr via `var fp = &efi_main`, set MS x64 args, call, ret to
+  firmware). Works but is delicate (small ordering bugs around
+  top-level `var X = expr;` vs. `asm` interleaving cost a debugging
+  cycle in Step 4a/Step 4 first attempt).
+  *Filed upstream:* `cyrius/docs/development/issues/2026-05-13-gnoboot-efi-main-convention.md`.
+
+### Verified entry-trampoline pattern (works under cyrius 5.11.49)
+
+```cyrius
+kernel;
+
+fn efi_main(handle, st) {
+    # ... normal cyrius. Inside a fn body, the agnos-shim
+    # `var p = &g; asm { ... }` register-capture pattern works.
+    return 0;
+}
+
+# Top-level: ~15 lines of asm hand off firmware entry to efi_main.
+asm {
+    0x49; 0x89; 0xCE;          # mov r14, rcx  ; save ImageHandle
+    0x49; 0x89; 0xD7;          # mov r15, rdx  ; save SystemTable*
+}
+var fp = &efi_main;            # cyrius emits: rax = &efi_main
+asm {
+    0x4C; 0x89; 0xF1;          # mov rcx, r14  ; MS x64 arg 0
+    0x4C; 0x89; 0xFA;          # mov rdx, r15  ; MS x64 arg 1
+    0x48; 0x83; 0xEC; 0x08;    # sub rsp, 8    ; re-align stack
+    0xFF; 0xD0;                # call rax
+    0x48; 0x83; 0xC4; 0x08;    # add rsp, 8
+    0x31; 0xC0;                # xor eax, eax  ; EFI_SUCCESS
+    0xC3;                      # ret to firmware
+}
+```
+
+R14/R15 are callee-saved in both SysV and MS x64, so they survive
+across cyrius's `var fp = &efi_main` emit. The ABI inside the call
+is MS x64 (cyrius's internal convention under TARGET_EFI).
 
 ### Pending for v0.1.0
 
