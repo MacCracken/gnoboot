@@ -58,7 +58,23 @@ assert_eq "DOS magic"          0x00 2 "4d5a"
 assert_eq "PE signature"       0x40 4 "50450000"
 assert_eq "COFF Characteristics" 0x56 2 "2200"
 assert_eq "Subsystem"          0x9c 2 "0a00"
-assert_eq "DllCharacteristics" 0x9e 2 "0001"
+
+# DllCharacteristics: NX_COMPAT (0x0100) must be set. Other bits are
+# permitted — when the binary has base relocations, cyrius sets
+# DYNAMIC_BASE (0x0040) + HIGH_ENTROPY_VA (0x0020) as well, giving
+# 0x0160. A banner-only build (no relocs) shows the raw 0x0100.
+# Either is fine.
+dllc_bytes="$(read_bytes 0x9e 2)"
+dllc_hi="$(echo "$dllc_bytes" | cut -c3-4)"     # high byte (LE: 2nd nibble pair)
+case "$dllc_hi" in
+    *[13579bdf]*)
+        printf "  PASS: %-30s @ 0x9e = %s (NX_COMPAT set)\n" "DllCharacteristics" "$dllc_bytes"
+        ;;
+    *)
+        printf "  FAIL: %-30s @ 0x9e = %s (NX_COMPAT bit 0x0100 not set; high byte = %s)\n" "DllCharacteristics" "$dllc_bytes" "$dllc_hi"
+        FAILED=1
+        ;;
+esac
 
 if [ "$FAILED" = "1" ]; then
     echo "structural gate: FAIL"

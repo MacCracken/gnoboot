@@ -15,6 +15,8 @@ gcc/clang/llvm; agnos replaced Linux) eats GRUB next.
 | Step | Description | Status |
 |------|-------------|--------|
 | 3 | Console banner via SystemTable→ConOut→OutputString | ✓ 2026-05-13 (boots under QEMU OVMF) |
+| 3.5 | CI / release workflows + structural + OVMF gates | ✓ 2026-05-13 |
+| 4a | Infrastructure probe: cyrius global capture + firmware-RDX survival + .reloc applied | ✓ 2026-05-13 |
 | 4 | ESP file read (open SimpleFileSystem, read `/boot/agnos`) | pending |
 | 5 | ELF64 parse + AllocatePages + LOAD-segment copy | pending |
 | 6 | GetMemoryMap | pending |

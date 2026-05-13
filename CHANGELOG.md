@@ -43,6 +43,38 @@ on the NUC AMD. v0.1.0 will not be tagged until both gates pass.
   gate `tests/verify_pe.sh` reports all 5 PE-header fields PASS.
   Runtime gate `tests/ovmf_smoke.sh` reports
   `PASS: "gnoboot v0.1.0" observed on ConOut`.
+- 2026-05-13 — **Step 4a probe (infrastructure)** PASS. Verified
+  three unknowns in one boot:
+    - `var p = &uninitialized_global;` at top level emits
+      `lea rax, [rip + DIR64_reloc]` (the agnos Path A shim pattern
+      transfers to gnoboot's top-level kernel; mode).
+    - Firmware's `RDX = SystemTable*` survives cyrius's prologue +
+      the `&foo` statement.
+    - Cyrius `.reloc` directory populated correctly and the DIR64
+      base relocation is applied by the UEFI loader (the captured
+      address resolves to a valid SystemTable* at runtime —
+      confirmed because the post-capture ConOut walk worked).
+- 2026-05-13 — `verify_pe.sh` DllCharacteristics check relaxed:
+  asserts NX_COMPAT (0x0100) bit set, not the exact 0x0100 value.
+  Cyrius emits DYNAMIC_BASE + HIGH_ENTROPY_VA (0x0060) too when the
+  binary has base relocations — both reloc-empty (Step 3) and
+  reloc-populated (Step 4+) shapes now pass.
+
+### Known cyrius constraints (informed Step 4 design)
+
+- **No array-with-initializer syntax** — `var foo[N] = { 0x.., 0x.. };`
+  is rejected with `expected ';', got '='`. Cyrius supports
+  `var s = "ascii";` for ASCII strings but not byte-array literals.
+  Pattern for UTF-16LE buffers (UEFI CHAR16*): declare uninitialized
+  `var buf[N];`, then `store8(&buf + i, byte)` at runtime, OR embed
+  the bytes inline in an `asm { ... }` block and reference via
+  `lea rdx, [rip + N]`.
+- **Cyrius internal ABI is SysV (RDI/RSI/RDX/RCX/R8/R9)**, even
+  under `_TARGET_PE` / `_TARGET_EFI_APPLICATION`. The MS x64 ABI
+  work is only for the entry boundary. Calls to firmware function
+  pointers (UEFI's MS x64 ABI: RCX/RDX/R8/R9 + 32-byte shadow space
+  + 16-byte stack alignment) need an inline-asm trampoline at every
+  firmware-call site. Source: `cyrius/lib/fnptr.cyr` comment block.
 
 ### Pending for v0.1.0
 
