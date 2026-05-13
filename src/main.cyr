@@ -1,0 +1,73 @@
+# gnoboot — sovereign UEFI bootloader for AGNOS
+#
+# Step 3 of the Path C plan (agnosticos/docs/development/path-c-sovereign-uefi.md):
+# minimal banner that proves the UEFI loader path works end-to-end —
+# firmware loads BOOTX64.EFI, calls our entry, banner appears on
+# firmware's ConOut serial, we return EFI_SUCCESS.
+#
+# Pattern mirrors cyrius/programs/efi_probe.cyr — single inline-asm
+# block, no cyrius globals (no DIR64 fixups needed at this scale),
+# walks SystemTable → ConOut → OutputString register-indirect.
+# All offsets per UEFI spec § 4.3 (SystemTable) and § 12.4
+# (SIMPLE_TEXT_OUTPUT_PROTOCOL).
+#
+# UEFI entry contract (MS x64 ABI):
+#   RCX = ImageHandle (EFI_HANDLE)
+#   RDX = SystemTable* (EFI_SYSTEM_TABLE *)
+#   caller reserves 0x20 shadow space; 16-byte stack alignment at calls
+#   returns EFI_STATUS in RAX
+#
+# Cyrius emits a 5-byte `e9 00 00 00 00` (jmp +0) prologue at .text+0;
+# touches no GPRs, so RCX/RDX from firmware survive into our first byte.
+#
+# Build:
+#   CYRIUS_TARGET_EFI=1 cyrius build src/main.cyr build/BOOTX64.EFI
+#
+# Verify (structural):
+#   xxd -s 0x40 -l 4 build/BOOTX64.EFI       # "PE\0\0"
+#   xxd -s 0x56 -l 2 build/BOOTX64.EFI       # COFF Char 0x0022 (no RELOCS_STRIPPED)
+#   xxd -s 0x9c -l 2 build/BOOTX64.EFI       # Subsystem 0x000A (EFI_APPLICATION)
+#
+# Smoke (runtime):
+#   scripts/test-ovmf.sh                     # boots under qemu+OVMF, expects banner
+
+kernel;
+
+asm {
+    # mov rcx, [rdx + 0x40]   ; ConOut = SystemTable->ConOut
+    0x48; 0x8B; 0x4A; 0x40;
+    # mov rax, [rcx + 0x08]   ; OutputString fn ptr
+    0x48; 0x8B; 0x41; 0x08;
+    # lea rdx, [rip + 0x0E]   ; rdx = &banner (14 bytes past end-of-LEA)
+    0x48; 0x8D; 0x15; 0x0E; 0x00; 0x00; 0x00;
+    # sub rsp, 0x28           ; MS x64 shadow space + alignment
+    0x48; 0x83; 0xEC; 0x28;
+    # call rax                ; OutputString(rcx=ConOut, rdx=banner)
+    0xFF; 0xD0;
+    # add rsp, 0x28
+    0x48; 0x83; 0xC4; 0x28;
+    # xor eax, eax            ; EFI_SUCCESS = 0
+    0x31; 0xC0;
+    # ret                     ; firmware reads rax as EFI_STATUS
+    0xC3;
+    # nop (align banner to 2 bytes for CHAR16)
+    0x90;
+    # banner: UTF-16LE "gnoboot v0.1.0\r\n\0" (34 bytes, 17 CHAR16 units)
+    0x67; 0x00;   # 'g'
+    0x6E; 0x00;   # 'n'
+    0x6F; 0x00;   # 'o'
+    0x62; 0x00;   # 'b'
+    0x6F; 0x00;   # 'o'
+    0x6F; 0x00;   # 'o'
+    0x74; 0x00;   # 't'
+    0x20; 0x00;   # ' '
+    0x76; 0x00;   # 'v'
+    0x30; 0x00;   # '0'
+    0x2E; 0x00;   # '.'
+    0x31; 0x00;   # '1'
+    0x2E; 0x00;   # '.'
+    0x30; 0x00;   # '0'
+    0x0D; 0x00;   # '\r'
+    0x0A; 0x00;   # '\n'
+    0x00; 0x00;   # '\0' terminator
+}
