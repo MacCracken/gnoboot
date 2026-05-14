@@ -17,8 +17,10 @@ gcc/clang/llvm; agnos replaced Linux) eats GRUB next.
 | 3 | Console banner via SystemTable→ConOut→OutputString | ✓ 2026-05-13 (boots under QEMU OVMF) |
 | 3.5 | CI / release workflows + structural + OVMF gates | ✓ 2026-05-13 |
 | 4a | Infrastructure probe — *retrospectively a misread*: capture was a no-op, print worked via firmware-preserved RDX. Lesson: top-level `var p = &foo; asm` doesn't work (cyrius reorders); use a fn or pure asm. | ⚠ 2026-05-13 (printed PASS, but capture was a no-op) |
-| 4 | `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &out)` returns EFI_SUCCESS — first MS x64 firmware call from gnoboot. Pure-asm block, stack-based OUT param. | ✓ 2026-05-13 |
-| 5 | Open SimpleFileSystem on LoadedImage->DeviceHandle, OpenVolume, open `\boot\agnos`, Read first 4 bytes, check ELF magic | pending |
+| 4 | `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &out)` returns EFI_SUCCESS — first MS x64 firmware call from gnoboot. Rewritten on cyrius 5.11.52 ergonomics: `fn efi_main` + byte-array literals + `fncall3`. | ✓ 2026-05-13 |
+| 5 | Open `\boot\agnos` via SimpleFileSystem, read first 4 bytes, check ELF magic | ✓ 2026-05-13 (5 firmware calls chained; "step 5: /boot/agnos magic = ELF" observed) |
+| 6 | GetMemoryMap, copy into sovereign-struct memmap | pending |
+| 7 | Build sovereign boot-info struct, ExitBootServices, jump to kernel entry | pending |
 | 5 | ELF64 parse + AllocatePages + LOAD-segment copy | pending |
 | 6 | GetMemoryMap | pending |
 | 7 | Sovereign boot-info struct build + ExitBootServices + jump | pending |

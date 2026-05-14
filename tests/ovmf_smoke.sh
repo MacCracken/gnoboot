@@ -63,6 +63,20 @@ mmd -i disk.img@@1048576 ::EFI
 mmd -i disk.img@@1048576 ::EFI/BOOT
 mcopy -i disk.img@@1048576 "$EFI" ::EFI/BOOT/BOOTX64.EFI
 
+# Optional: drop an `/boot/agnos` payload on the ESP so Step 5+ smoke
+# tests can open and read it. $AGNOS_KERNEL overrides; default tries
+# the local agnos build, then synthesizes a 4-byte ELF-magic file.
+AGNOS_KERNEL="${AGNOS_KERNEL:-$ROOT/../agnos/build/agnos}"
+if [ -f "$AGNOS_KERNEL" ]; then
+    mmd -i disk.img@@1048576 ::boot 2>/dev/null || true
+    mcopy -i disk.img@@1048576 "$AGNOS_KERNEL" ::boot/agnos
+elif [ "${SYNTH_ELF:-1}" = "1" ]; then
+    # 4-byte fake: ELF magic only. Enough for "ELF" classification.
+    printf '\x7FELF' > agnos_stub
+    mmd -i disk.img@@1048576 ::boot 2>/dev/null || true
+    mcopy -i disk.img@@1048576 agnos_stub ::boot/agnos
+fi
+
 cp "$OVMF_VARS_SRC" vars.fd
 chmod +w vars.fd
 

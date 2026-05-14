@@ -1,121 +1,146 @@
-# gnoboot Step 4 — fn-based architecture, verified.
+# gnoboot — Sovereign UEFI bootloader for AGNOS.
 #
-# Entry trampoline pattern (proven on QEMU OVMF 2026-05-13):
-#   asm { mov r14, rcx; mov r15, rdx }   ; capture firmware args to callee-saved
-#   var fp = &efi_main;                   ; cyrius: rax = &efi_main
-#   asm { mov rcx, r14; mov rdx, r15; call rax }   ; MS x64 call into the fn
+# Step 5: open `\boot\agnos` on the ESP via SimpleFileSystem, read the
+# first 4 bytes, check for ELF magic (7F 45 4C 46).
 #
-# *Cyrius's internal fn-call ABI under CYRIUS_TARGET_EFI is MS x64*,
-# not SysV (verified via objdump — callee's prologue stores rcx/rdx,
-# not rdi/rsi). This contradicts the lib/fnptr.cyr comment which
-# documents SysV — surfaced upstream in
-# cyrius/docs/development/issues/2026-05-13-gnoboot-efi-main-convention.md.
+# Full firmware-call chain:
+#   1. bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &li_out)
+#   2. bs->HandleProtocol(LoadedImage->DeviceHandle, &SimpleFsGuid, &sfs_out)
+#   3. sfs->OpenVolume(sfs, &root_out)
+#   4. root->Open(root, &file_out, &path, EFI_FILE_MODE_READ, 0)
+#   5. file->Read(file, &size=4, &buf)
+#   6. Compare buf[0..4] == { 0x7F, 0x45, 0x4C, 0x46 }
 #
-# The trampoline could be folded into cyrius itself if/when the
-# `fn efi_main(handle, st)` convention proposal lands; until then we
-# carry the ~15 lines of asm here.
-#
-# Expected ConOut output on success: "fn entry works"
+# Build:   CYRIUS_TARGET_EFI=1 cyrius build src/main.cyr build/BOOTX64.EFI
+# Smoke:   tests/ovmf_smoke.sh   expects "step 5: /boot/agnos magic = ELF"
 
 kernel;
 
-# UTF-16LE buffer — populated by top-level store8 calls below
-var msg[34];
+include "lib/fnptr.cyr"
 
-# Marshal globals for the firmware-call trampoline inside print_msg
-var marshal_a0[8];
-var marshal_fp[8];
+# === UTF-16LE strings ====================================================
+
+# "step 5: /boot/agnos magic = " — 28 CHAR16 = 56 bytes + 2 NUL; N=8 → 64 bytes
+var msg_pre[8] = {
+    0x73,0x00, 0x74,0x00, 0x65,0x00, 0x70,0x00,    # step
+    0x20,0x00, 0x35,0x00, 0x3A,0x00, 0x20,0x00,    # ' 5: '
+    0x2F,0x00, 0x62,0x00, 0x6F,0x00, 0x6F,0x00,    # /boo
+    0x74,0x00, 0x2F,0x00, 0x61,0x00, 0x67,0x00,    # t/ag
+    0x6E,0x00, 0x6F,0x00, 0x73,0x00, 0x20,0x00,    # nos '
+    0x6D,0x00, 0x61,0x00, 0x67,0x00, 0x69,0x00,    # magi
+    0x63,0x00, 0x20,0x00, 0x3D,0x00, 0x20,0x00     # c '='
+};
+
+# "ELF\r\n\0"
+var msg_elf[2] = {
+    0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x0D,0x00, 0x0A,0x00
+};
+
+# "no ELF (magic=...)\r\n\0" — keep simple for v1: just "no ELF\r\n\0"
+var msg_no_elf[2] = {
+    0x6E,0x00, 0x6F,0x00, 0x20,0x00, 0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x0D,0x00, 0x0A,0x00
+};
+
+# Step-failure indicators per firmware-call stage. UTF-16LE.
+# Sizing: array [N] holds N*8 bytes; UTF-16LE is 2 bytes per char +
+# NUL terminator. Pick N = ceil((chars+1)*2 / 8).
+var msg_li_fail[3]  = { 0x4C,0x00, 0x49,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };   # "LI fail\r\n"   (9 CHAR16 = 18 bytes; N=3 → 24)
+var msg_sfs_fail[3] = { 0x53,0x00, 0x46,0x00, 0x53,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };   # "SFS fail\r\n"  (10 CHAR16 = 20 bytes; N=3 → 24)
+var msg_vol_fail[3] = { 0x56,0x00, 0x4F,0x00, 0x4C,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };   # "VOL fail\r\n"  (10 CHAR16 = 20 bytes; N=3 → 24)
+var msg_open_fail[3]= { 0x4F,0x00, 0x50,0x00, 0x4E,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };   # "OPN fail\r\n"  (10 CHAR16 = 20 bytes; N=3 → 24)
+var msg_read_fail[3]= { 0x52,0x00, 0x44,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };               # "RD fail\r\n"   (9 CHAR16 = 18 bytes; N=3 → 24)
+
+# Path: UTF-16LE "\boot\agnos\0" — 12 CHAR16 = 24 bytes; N=3 → 24 bytes (last 2 = NUL)
+var path[3] = {
+    0x5C,0x00,                                                # '\'
+    0x62,0x00, 0x6F,0x00, 0x6F,0x00, 0x74,0x00,               # boot
+    0x5C,0x00,                                                # '\'
+    0x61,0x00, 0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x73,0x00     # agnos
+};
+
+# === Protocol GUIDs ======================================================
+
+# EFI_LOADED_IMAGE_PROTOCOL_GUID = 5B1B31A1-9562-11D2-8E3F-00A0C969723B
+var li_guid[2] = {
+    0xA1,0x31,0x1B,0x5B,
+    0x62,0x95,
+    0xD2,0x11,
+    0x8E,0x3F,0x00,0xA0,0xC9,0x69,0x72,0x3B
+};
+
+# EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID = 964E5B22-6459-11D2-8E39-00A0C969723B
+var sfs_guid[2] = {
+    0x22,0x5B,0x4E,0x96,
+    0x59,0x64,
+    0xD2,0x11,
+    0x8E,0x39,0x00,0xA0,0xC9,0x69,0x72,0x3B
+};
+
+# === OUT slots + read buffer ============================================
+
+var li_out[1];         # LoadedImage*
+var sfs_out[1];        # SimpleFileSystem*
+var root_out[1];       # EFI_FILE_PROTOCOL* (volume root)
+var file_out[1];       # EFI_FILE_PROTOCOL* (the \boot\agnos file)
+var read_sz[1];        # IN: max read; OUT: actual read
+var read_buf[1];       # 8 bytes (we only need 4 for ELF magic)
 
 
-# === fn body ============================================================
+# === Helpers ============================================================
 
-fn print_msg(handle, st) {
-    # SysV ABI on the way in: rdi = handle, rsi = st (after the top-level
-    # asm's translation from MS x64).
+fn efi_print(st, msg): i64 {
     var con_out = load64(st + 0x40);
     var out_str = load64(con_out + 0x08);
+    return fncall2(out_str, con_out, msg);
+}
 
-    # The agnos-shim pattern (var p = &g; asm { mov [rax], ... }) is
-    # documented to work INSIDE a fn body — let's exercise it.
-    store64(&marshal_a0, con_out);
-    store64(&marshal_fp, out_str);
 
-    var pmsg = &msg;
-    asm {
-        # rax = &msg (from the cyrius lea above). Move to rdx for MS x64 arg 1.
-        0x48; 0x89; 0xC2;          # mov rdx, rax
-    }
+# === Entry ============================================================
 
-    var pa0 = &marshal_a0;
-    asm {
-        # rax = &marshal_a0. Load *rax = con_out into rcx (MS x64 arg 0).
-        0x48; 0x8B; 0x08;          # mov rcx, [rax]
-    }
+fn efi_main(handle, st): i64 {
+    efi_print(st, &msg_pre);
 
-    var pfp = &marshal_fp;
-    asm {
-        # rax = &marshal_fp. Load *rax = out_str into rax (call target).
-        0x48; 0x8B; 0x00;          # mov rax, [rax]
-        # sub rsp, 0x28; call rax; add rsp, 0x28  (MS x64 shadow + align)
-        0x48; 0x83; 0xEC; 0x28;
-        0xFF; 0xD0;
-        0x48; 0x83; 0xC4; 0x28;
+    var bs    = load64(st + 0x60);                 # SystemTable->BootServices
+    var fn_hp = load64(bs + 0x98);                 # BootServices->HandleProtocol
+
+    # 1. Find LoadedImage on our own ImageHandle.
+    var rc = fncall3(fn_hp, handle, &li_guid, &li_out);
+    if (rc != 0) { efi_print(st, &msg_li_fail); return 0; }
+
+    # 2. Find SimpleFileSystem on the device handle the image was loaded from.
+    var li  = load64(&li_out);
+    var dev = load64(li + 0x18);                   # LoadedImage->DeviceHandle
+    rc = fncall3(fn_hp, dev, &sfs_guid, &sfs_out);
+    if (rc != 0) { efi_print(st, &msg_sfs_fail); return 0; }
+
+    # 3. OpenVolume → root EFI_FILE_PROTOCOL*.
+    var sfs        = load64(&sfs_out);
+    var fn_openvol = load64(sfs + 0x08);           # SFS->OpenVolume
+    rc = fncall2(fn_openvol, sfs, &root_out);
+    if (rc != 0) { efi_print(st, &msg_vol_fail); return 0; }
+
+    # 4. Open `\boot\agnos` (mode=READ=1, attrs=0).
+    var root    = load64(&root_out);
+    var fn_open = load64(root + 0x08);             # File->Open
+    rc = fncall5(fn_open, root, &file_out, &path, 1, 0);
+    if (rc != 0) { efi_print(st, &msg_open_fail); return 0; }
+
+    # 5. Read first 4 bytes.
+    var file    = load64(&file_out);
+    var fn_read = load64(file + 0x20);             # File->Read
+    store64(&read_sz, 4);
+    rc = fncall3(fn_read, file, &read_sz, &read_buf);
+    if (rc != 0) { efi_print(st, &msg_read_fail); return 0; }
+
+    # 6. Check ELF magic 7F 45 4C 46 (byte-by-byte; no load32 dependency).
+    var b0 = load8(&read_buf + 0);
+    var b1 = load8(&read_buf + 1);
+    var b2 = load8(&read_buf + 2);
+    var b3 = load8(&read_buf + 3);
+    if (b0 == 0x7F && b1 == 0x45 && b2 == 0x4C && b3 == 0x46) {
+        efi_print(st, &msg_elf);
+    } else {
+        efi_print(st, &msg_no_elf);
     }
     return 0;
-}
-
-
-# === Top-level entry ====================================================
-
-# Build msg = UTF-16LE "fn entry works\r\n\0" (32 bytes data + 2 NUL = 34)
-store8(&msg +  0, 0x66); store8(&msg +  1, 0x00);  # f
-store8(&msg +  2, 0x6E); store8(&msg +  3, 0x00);  # n
-store8(&msg +  4, 0x20); store8(&msg +  5, 0x00);  # SP
-store8(&msg +  6, 0x65); store8(&msg +  7, 0x00);  # e
-store8(&msg +  8, 0x6E); store8(&msg +  9, 0x00);  # n
-store8(&msg + 10, 0x74); store8(&msg + 11, 0x00);  # t
-store8(&msg + 12, 0x72); store8(&msg + 13, 0x00);  # r
-store8(&msg + 14, 0x79); store8(&msg + 15, 0x00);  # y
-store8(&msg + 16, 0x20); store8(&msg + 17, 0x00);  # SP
-store8(&msg + 18, 0x77); store8(&msg + 19, 0x00);  # w
-store8(&msg + 20, 0x6F); store8(&msg + 21, 0x00);  # o
-store8(&msg + 22, 0x72); store8(&msg + 23, 0x00);  # r
-store8(&msg + 24, 0x6B); store8(&msg + 25, 0x00);  # k
-store8(&msg + 26, 0x73); store8(&msg + 27, 0x00);  # s
-store8(&msg + 28, 0x0D); store8(&msg + 29, 0x00);  # \r
-store8(&msg + 30, 0x0A); store8(&msg + 31, 0x00);  # \n
-
-# Capture firmware args to callee-saved regs (preserved across cyrius
-# internal calls in BOTH SysV and MS x64).
-asm {
-    # mov r14, rcx     ; ImageHandle
-    0x49; 0x89; 0xCE;
-    # mov r15, rdx     ; SystemTable*
-    0x49; 0x89; 0xD7;
-}
-
-# Get the cyrius fn pointer. Under the observed kmode emit-order, the
-# `var p = &foo;` init code emits *between* this statement and the next
-# asm block — so the next asm starts with `rax = &print_msg`.
-var fp = &print_msg;
-
-# Pass firmware args to print_msg using MS x64 ABI (cyrius's internal
-# call convention under CYRIUS_TARGET_EFI; see file header).
-asm {
-    # mov rcx, r14   ; arg 0 = ImageHandle
-    0x4C; 0x89; 0xF1;
-    # mov rdx, r15   ; arg 1 = SystemTable*
-    0x4C; 0x89; 0xFA;
-    # The entry into our binary was via `call` (firmware pushed a return
-    # address). After two `mov`s rsp is still 8 mod 16. We need 0 mod 16
-    # before our internal `call rax`, so sub rsp, 8.
-    0x48; 0x83; 0xEC; 0x08;
-    # call rax    ; print_msg(rcx=ImageHandle, rdx=SystemTable)
-    0xFF; 0xD0;
-    # add rsp, 8
-    0x48; 0x83; 0xC4; 0x08;
-    # xor eax, eax        ; EFI_SUCCESS
-    0x31; 0xC0;
-    # ret                 ; back to firmware
-    0xC3;
 }

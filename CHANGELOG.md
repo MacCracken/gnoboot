@@ -74,6 +74,100 @@ on the NUC AMD. v0.1.0 will not be tagged until both gates pass.
   pure-asm) and reloc-populated (later steps, once we use cyrius
   globals inside a fn) shapes now pass.
 
+### v5.11.52 migration (2026-05-13)
+
+- Pin bumped 5.11.49 → 5.11.52. Both gnoboot-filed enhancement
+  issues landed:
+    - **Byte-array literal `var foo[N] = { 0x.., ... };`** (v5.11.51)
+      — used for `msg_pre` / `msg_ok` / `msg_fail` / `li_guid`.
+      ~150 lines of `store8` runs collapsed to four brace lists.
+    - **`fn efi_main(handle, st)` convention + lib/fnptr.cyr
+      TARGET_WIN fires under TARGET_EFI** (v5.11.52). Replaces
+      gnoboot's hand-rolled SysV→MS-x64 entry trampoline + the
+      hand-rolled firmware-call asm trampolines. `fncall2` /
+      `fncall3` now do the right MS-x64 ABI dance natively.
+- **Caveat — cyrius 5.11.52 entry-save REX bug.** The auto-emitted
+  save at the entry-jmp target encodes `mov rsi, r9; mov rdi, r10`
+  (REX.R extension) where it intended `mov r14, rcx; mov r15, rdx`
+  (needs REX.B extension for r14/r15 as destination). Firmware's
+  RCX/RDX are NOT saved; the call-site restore later pulls
+  undefined R14/R15. gnoboot's six-byte corrective save at the end
+  of top-level user code (`asm { 49 89 CE; 49 89 D7 }`) patches
+  R14/R15 with the correct values before gvar_inits clobber RCX/RDX.
+  Cyrius's broken save happens *before* user code (clobbers RSI/RDI
+  but spares RCX/RDX — happily benign). Filed at
+  `cyrius/docs/development/issues/2026-05-13-efi-main-trampoline-save-rex-wrong.md`.
+  Remove the corrective asm once 5.11.53+ ships the fix.
+
+### Step 5 verified on cyrius 5.11.53 (2026-05-13)
+
+`tests/ovmf_smoke.sh` PASS: `step 5: /boot/agnos magic = ELF`
+observed on ConOut. Five firmware calls chained, all clean cyrius:
+
+1. `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &li_out)` →
+   LoadedImage pointer.
+2. `bs->HandleProtocol(LoadedImage->DeviceHandle, &SimpleFsGuid, &sfs_out)` →
+   SimpleFileSystem pointer on the device gnoboot was loaded from.
+3. `sfs->OpenVolume(sfs, &root_out)` → root EFI_FILE_PROTOCOL*.
+4. `root->Open(root, &file_out, "\boot\agnos", EFI_FILE_MODE_READ, 0)` →
+   file handle.
+5. `file->Read(file, &size=4, &buf)` → first 4 bytes of the kernel.
+
+ELF magic check (`buf[0..4] == 7F 45 4C 46`) confirms a real ELF
+header. The agnos kernel binary at `/home/macro/Repos/agnos/build/agnos`
+(251 KB, ELF64) is the test payload, copied onto the test ESP by
+`tests/ovmf_smoke.sh` (script auto-detects the kernel build, falls
+back to a 4-byte synthetic ELF-magic stub if absent).
+
+Two byte-array-literal sizing errors caught during build (`msg_li_fail`
+at 18 bytes in N=2=16 cap, `msg_sfs_fail` at 20 bytes in N=2=16 cap)
+— bumped to N=3. Cyrius's error reported line 22 (a blank line) for
+the first overflowing array; the actual array is later in the source.
+Minor papercut, not file-worthy yet — re-check if it bites again.
+
+Cyrius 5.11.53's hotfix (entry-save REX prefix `4C → 49`) verified:
+disassembly at the entry-jmp target now shows the correct
+`49 89 CE; 49 89 D7` (`mov r14, rcx; mov r15, rdx`). The corrective
+save asm that workaround'd 5.11.52 has been removed from `src/main.cyr`.
+
+### Step 4 verified post-5.11.52 (2026-05-13)
+
+`tests/ovmf_smoke.sh` PASS:
+`step 4: HandleProtocol(LoadedImage) = ok` observed on ConOut.
+The shape that worked:
+
+```cyrius
+kernel;
+
+include "lib/fnptr.cyr"
+
+var msg_pre[10]  = { 0x73,0x00, ... };   # UTF-16LE banner
+var li_guid[2]   = { 0xA1,0x31,0x1B,0x5B, ... };
+var li_out[1];
+
+fn efi_print(st, msg): i64 {
+    var con_out = load64(st + 0x40);
+    var out_str = load64(con_out + 0x08);
+    return fncall2(out_str, con_out, msg);
+}
+
+fn efi_main(handle, st): i64 {
+    efi_print(st, &msg_pre);
+    var bs    = load64(st + 0x60);
+    var fn_hp = load64(bs + 0x98);
+    var rc    = fncall3(fn_hp, handle, &li_guid, &li_out);
+    if (rc == 0) { efi_print(st, &msg_ok); }
+    else         { efi_print(st, &msg_fail); }
+    return 0;
+}
+
+# Six-byte corrective save (removable post-5.11.53 fix)
+asm {
+    0x49; 0x89; 0xCE;    # mov r14, rcx
+    0x49; 0x89; 0xD7;    # mov r15, rdx
+}
+```
+
 ### Known cyrius constraints (informed Step 4 design)
 
 These are ergonomic gaps in `CYRIUS_TARGET_EFI` mode, not bugs.
