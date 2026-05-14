@@ -21,7 +21,8 @@ gcc/clang/llvm; agnos replaced Linux) eats GRUB next.
 | 5 | Open `\boot\agnos` via SimpleFileSystem, read first 4 bytes, check ELF magic | ✓ 2026-05-13 (5 firmware calls chained; "step 5: /boot/agnos magic = ELF" observed) |
 | 5b | Parse ELF64 header + program header, AllocatePages at PT_LOAD's p_paddr (`0x100000`), copy 245 KB of file bytes into place, verify ELF magic at load addr | ✓ 2026-05-13 ("step 5b: kernel mapped at 0x100000 = ok" observed) |
 | 6 | GetMemoryMap into 16 KB buffer; capture map_key for later ExitBootServices | ✓ 2026-05-13 ("step 6: kernel @ 0x100000 + memmap = ok" observed) |
-| 7 | Build sovereign boot-info struct, ExitBootServices, jump to kernel entry — **point of no return** (console gone after EBS) | pending |
+| 7 | Build sovereign boot-info struct, ExitBootServices, jump to kernel entry | ✓ 2026-05-13 (kernel prints "AGNOS kernel v1.30.0" through "Page tables: 1024MB mapped" — gnoboot's MVP handoff verified end-to-end on QEMU OVMF; kernel-side stall past page tables is a separate agnos investigation) |
+| 8 | agnos shim swap MB2→sovereign struct (cross-repo, agnos repo) | ✓ 2026-05-13 (agnos 1.30.0 — RBX→RDI in `mbi.cyr`, renames throughout, cyrius pin 5.11.43→5.11.53) |
 | 5 | ELF64 parse + AllocatePages + LOAD-segment copy | pending |
 | 6 | GetMemoryMap | pending |
 | 7 | Sovereign boot-info struct build + ExitBootServices + jump | pending |

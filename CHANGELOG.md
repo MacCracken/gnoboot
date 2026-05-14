@@ -99,6 +99,52 @@ on the NUC AMD. v0.1.0 will not be tagged until both gates pass.
   `cyrius/docs/development/issues/2026-05-13-efi-main-trampoline-save-rex-wrong.md`.
   Remove the corrective asm once 5.11.53+ ships the fix.
 
+### Step 7 verified — KERNEL BOOTED (2026-05-13)
+
+`tests/ovmf_smoke.sh` PASS: `AGNOS kernel v1.30.0` observed on
+ConOut, then 9 further kernel-side init lines through
+`Page tables: 1024MB mapped`. **gnoboot's MVP handoff works
+end-to-end on QEMU OVMF.**
+
+What chain ran successfully:
+
+1. UEFI firmware loaded gnoboot at `\EFI\BOOT\BOOTX64.EFI`.
+2. Cyrius's `fn efi_main` trampoline saved RCX/RDX → R14/R15
+   (correctly encoded, post-5.11.53 hotfix).
+3. gnoboot opened `\boot\agnos`, parsed ELF64 header + program
+   header, AllocatePages'd at `0x100000`, loaded 245 KB into place.
+4. gnoboot built the 80-byte sovereign boot-info struct:
+   `magic = 0x41474E4F ('AGNO')`, `version = 1`, `struct_size = 80`,
+   `memmap_phys = &mm_buf`, `memmap_count`, `memmap_entsize`,
+   `efi_st_phys = SystemTable*`, END tag at offset `0x48` (type=0).
+5. gnoboot called `bs->GetMemoryMap` twice (initial + fresh-key for
+   EBS), then `bs->ExitBootServices(handle, mm_key)`.
+6. gnoboot jumped to `0x1000A8` with `RDI = &boot_info` via inline
+   asm: `mov rdi, rax; mov eax, 0x1000A8; jmp rax`.
+7. agnos kernel's boot_shim ran (RSP at 0x200000, COM1 UART init).
+8. `boot_info_capture_rdi()` stashed `RDI` into `boot_info_ptr`.
+9. agnos kernel proper ran through 10 init checkpoints printing to
+   UART (gnoboot's serial-stdio captured them).
+
+**Architectural MVP gate cleared in emulation.** Iron Attempt 5 on
+the NUC AMD is the remaining smoke test.
+
+### Open finding — kernel stalls past Page tables init
+
+Under the gnoboot+OVMF boot path, the agnos kernel stops printing
+after `Page tables: 1024MB mapped`. Under the legacy
+`qemu-system-x86_64 -kernel` path the kernel had reached
+`Memory isolation: PASS` / `Userland exec complete` / KASLR probe.
+The difference: UEFI's pre-handoff environment leaves the kernel
+with UEFI's GDT, identity-mapped page tables, NX bits configured,
+etc. Something post-page-tables doesn't like that inheritance.
+
+**Not a gnoboot bug** — the handoff itself is verified correct
+(kernel banner + 9 init lines all print *after* ExitBootServices).
+This is the next agnos investigation; documented in
+`agnos/docs/development/state.md` § *Open investigation — kernel
+hang post-page-tables under UEFI+gnoboot*.
+
 ### Step 6 verified (2026-05-13)
 
 `tests/ovmf_smoke.sh` PASS:
