@@ -6,6 +6,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **GOP framebuffer capture for Attempt 7 boot-canary** (2026-05-13).
+  Attempt 6 on NUC AMD reproduced Attempt 5's symptom (step-7 line +
+  blank + reset) — meaning the BSS-zero and EfiLoaderCode fixes below
+  ran on iron and didn't change the outcome. Both highest-confidence
+  hypotheses are ruled out; remaining hypotheses (inherited PT W^X,
+  GDT divergence, CR0/CR4 state) can't be bisected without visibility
+  into kernel-side execution, and no serial cable is yet attached.
+  GOP capture lets the kernel's first instruction paint a visible
+  canary stripe — see agnos `boot_shim.cyr` ELF64 path.
+
+  Implementation: `LocateProtocol(EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID)`
+  pre-EBS (Boot Service; must run before Step 12 `GetMemoryMap`
+  refresh because any firmware call invalidates the map key).
+  Copies `fb_phys`, `fb_pitch = ppl × 4`, `fb_width`, `fb_height`,
+  `fb_pixel_format` from `gop->Mode` into inlined boot_info fields
+  at offsets 0x48-0x5C. Pointers go dead post-EBS but the framebuffer
+  physical base + geometry stay valid for the kernel's lifetime.
+  Failure mode benign: if no GOP (text-mode/headless firmware),
+  `fb_phys = 0` and the agnos canary's `JZ` skips the paint.
+
+  Boot-info struct grows 80 → 112 bytes; version field bumps 1 → 2.
+  Path-c doc § *Handoff protocol* updated to reflect the move from
+  tag-stream (type=1) to inlined fields. Kernel walkers MUST NOT
+  expect a framebuffer tag in the stream from v2 onward.
+
 ### Fixed
 
 - **Iron-only triple-fault post-EBS** (gnoboot's first iron run —
@@ -30,10 +57,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      executable" so NX stays clear in the inherited post-EBS page
      tables. One-byte change at the `bs->AllocatePages` call.
 
-  Both fixes bundle into one iron retest. `tests/ovmf_smoke.sh` still
-  PASS on QEMU OVMF (kernel reaches `Activating scheduler...`).
+  Both fixes shipped in Attempt 6 — no improvement on iron (same
+  symptom as Attempt 5). Hypotheses #1 and #2 ruled out; see *Added*
+  above for the next bisection step.
+  `tests/ovmf_smoke.sh` still PASS on QEMU OVMF (kernel reaches
+  `Activating scheduler...`).
   Diagnosis logged in `agnosticos/docs/development/iron-boot-testing-log.md`
-  § *Attempt 5 — 2026-05-13*.
+  § *Attempt 5* and § *Attempt 6*.
 
 
 ## [0.1.0] — 2026-05-13
