@@ -1,18 +1,19 @@
 # gnoboot — Sovereign UEFI bootloader for AGNOS.
 #
-# Step 5: open `\boot\agnos` on the ESP via SimpleFileSystem, read the
-# first 4 bytes, check for ELF magic (7F 45 4C 46).
+# Step 7 — POINT OF NO RETURN. Build the sovereign boot-info struct,
+# call ExitBootServices, jump to kernel entry at 0x1000A8 with
+# RDI = &boot_info. After EBS, gnoboot's console is gone; if we
+# print anything else it's via the kernel's own UART init at
+# port 0x3F8 (see agnos/kernel/arch/x86_64/boot_shim.cyr).
 #
-# Full firmware-call chain:
-#   1. bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &li_out)
-#   2. bs->HandleProtocol(LoadedImage->DeviceHandle, &SimpleFsGuid, &sfs_out)
-#   3. sfs->OpenVolume(sfs, &root_out)
-#   4. root->Open(root, &file_out, &path, EFI_FILE_MODE_READ, 0)
-#   5. file->Read(file, &size=4, &buf)
-#   6. Compare buf[0..4] == { 0x7F, 0x45, 0x4C, 0x46 }
+# Pairs with agnos 1.30.0 (kernel ABI break: sovereign-struct entry
+# contract — `RDI = &boot_info` with magic 0x41474E4F='AGNO'). See
+# agnos/CHANGELOG.md [1.30.0] for the kernel-side change, and
+# agnosticos/docs/development/path-c-sovereign-uefi.md § Handoff for
+# the struct spec.
 #
 # Build:   CYRIUS_TARGET_EFI=1 cyrius build src/main.cyr build/BOOTX64.EFI
-# Smoke:   tests/ovmf_smoke.sh   expects "step 5: /boot/agnos magic = ELF"
+# Smoke:   tests/ovmf_smoke.sh   expects "AGNOS kernel v" (from kernel itself)
 
 kernel;
 
@@ -20,70 +21,100 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "step 5: /boot/agnos magic = " — 28 CHAR16 = 56 bytes + 2 NUL; N=8 → 64 bytes
-var msg_pre[8] = {
+# "gnoboot 0.1 step 7: jumping to kernel...\r\n\0" — 43 CHAR16 = 86 bytes; N=11 → 88
+var msg_pre[11] = {
+    0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
+    0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
+    0x30,0x00, 0x2E,0x00, 0x31,0x00, 0x20,0x00,    # '0.1 '
     0x73,0x00, 0x74,0x00, 0x65,0x00, 0x70,0x00,    # step
-    0x20,0x00, 0x35,0x00, 0x3A,0x00, 0x20,0x00,    # ' 5: '
-    0x2F,0x00, 0x62,0x00, 0x6F,0x00, 0x6F,0x00,    # /boo
-    0x74,0x00, 0x2F,0x00, 0x61,0x00, 0x67,0x00,    # t/ag
-    0x6E,0x00, 0x6F,0x00, 0x73,0x00, 0x20,0x00,    # nos '
-    0x6D,0x00, 0x61,0x00, 0x67,0x00, 0x69,0x00,    # magi
-    0x63,0x00, 0x20,0x00, 0x3D,0x00, 0x20,0x00     # c '='
+    0x20,0x00, 0x37,0x00, 0x3A,0x00, 0x20,0x00,    # ' 7: '
+    0x6A,0x00, 0x75,0x00, 0x6D,0x00, 0x70,0x00,    # jump
+    0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
+    0x74,0x00, 0x6F,0x00, 0x20,0x00, 0x6B,0x00,    # 'to k'
+    0x65,0x00, 0x72,0x00, 0x6E,0x00, 0x65,0x00,    # erne
+    0x6C,0x00, 0x2E,0x00, 0x2E,0x00, 0x2E,0x00,    # l...
+    0x0D,0x00, 0x0A,0x00                             # \r\n
 };
 
-# "ELF\r\n\0"
-var msg_elf[2] = {
-    0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x0D,0x00, 0x0A,0x00
-};
+# Failure messages keyed to which firmware-call stage broke.
+var msg_li_f[3]  = { 0x4C,0x00, 0x49,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_sfs_f[3] = { 0x53,0x00, 0x46,0x00, 0x53,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_vol_f[3] = { 0x56,0x00, 0x4F,0x00, 0x4C,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_opn_f[3] = { 0x4F,0x00, 0x50,0x00, 0x4E,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_rd_f[3]  = { 0x52,0x00, 0x44,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_elf_f[3] = { 0x6E,0x00, 0x6F,0x00, 0x20,0x00, 0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_sp_f[3]  = { 0x53,0x00, 0x50,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_pt_f[3]  = { 0x50,0x00, 0x54,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_ap_f[3]  = { 0x41,0x00, 0x50,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_ld_f[3]  = { 0x4C,0x00, 0x44,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_vfy_f[3] = { 0x56,0x00, 0x46,0x00, 0x59,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_mm_f[3]  = { 0x4D,0x00, 0x4D,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
+var msg_ebs_f[3] = { 0x45,0x00, 0x42,0x00, 0x53,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };  # "EBS fail\r\n"
 
-# "no ELF (magic=...)\r\n\0" — keep simple for v1: just "no ELF\r\n\0"
-var msg_no_elf[2] = {
-    0x6E,0x00, 0x6F,0x00, 0x20,0x00, 0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x0D,0x00, 0x0A,0x00
-};
-
-# Step-failure indicators per firmware-call stage. UTF-16LE.
-# Sizing: array [N] holds N*8 bytes; UTF-16LE is 2 bytes per char +
-# NUL terminator. Pick N = ceil((chars+1)*2 / 8).
-var msg_li_fail[3]  = { 0x4C,0x00, 0x49,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };   # "LI fail\r\n"   (9 CHAR16 = 18 bytes; N=3 → 24)
-var msg_sfs_fail[3] = { 0x53,0x00, 0x46,0x00, 0x53,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };   # "SFS fail\r\n"  (10 CHAR16 = 20 bytes; N=3 → 24)
-var msg_vol_fail[3] = { 0x56,0x00, 0x4F,0x00, 0x4C,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };   # "VOL fail\r\n"  (10 CHAR16 = 20 bytes; N=3 → 24)
-var msg_open_fail[3]= { 0x4F,0x00, 0x50,0x00, 0x4E,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };   # "OPN fail\r\n"  (10 CHAR16 = 20 bytes; N=3 → 24)
-var msg_read_fail[3]= { 0x52,0x00, 0x44,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };               # "RD fail\r\n"   (9 CHAR16 = 18 bytes; N=3 → 24)
-
-# Path: UTF-16LE "\boot\agnos\0" — 12 CHAR16 = 24 bytes; N=3 → 24 bytes (last 2 = NUL)
+# Path: UTF-16LE "\boot\agnos\0" — 12 CHAR16 = 24 bytes; N=3 → 24
 var path[3] = {
-    0x5C,0x00,                                                # '\'
-    0x62,0x00, 0x6F,0x00, 0x6F,0x00, 0x74,0x00,               # boot
-    0x5C,0x00,                                                # '\'
-    0x61,0x00, 0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x73,0x00     # agnos
+    0x5C,0x00,
+    0x62,0x00, 0x6F,0x00, 0x6F,0x00, 0x74,0x00,
+    0x5C,0x00,
+    0x61,0x00, 0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x73,0x00
 };
 
 # === Protocol GUIDs ======================================================
 
-# EFI_LOADED_IMAGE_PROTOCOL_GUID = 5B1B31A1-9562-11D2-8E3F-00A0C969723B
 var li_guid[2] = {
-    0xA1,0x31,0x1B,0x5B,
-    0x62,0x95,
-    0xD2,0x11,
+    0xA1,0x31,0x1B,0x5B, 0x62,0x95, 0xD2,0x11,
     0x8E,0x3F,0x00,0xA0,0xC9,0x69,0x72,0x3B
 };
 
-# EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID = 964E5B22-6459-11D2-8E39-00A0C969723B
 var sfs_guid[2] = {
-    0x22,0x5B,0x4E,0x96,
-    0x59,0x64,
-    0xD2,0x11,
+    0x22,0x5B,0x4E,0x96, 0x59,0x64, 0xD2,0x11,
     0x8E,0x39,0x00,0xA0,0xC9,0x69,0x72,0x3B
 };
 
-# === OUT slots + read buffer ============================================
+# === Sovereign boot-info struct ==========================================
+# Layout per agnosticos/docs/development/path-c-sovereign-uefi.md § Handoff.
+# 80 bytes total (72 inlined fields + 8-byte END tag).
+#
+#   0x00  u32   magic            = 0x41474E4F ('AGNO')
+#   0x04  u32   version          = 1
+#   0x08  u32   struct_size      = 80
+#   0x0C  u32   flags            = 0
+#   0x10  u64   initramfs_phys   (filled at runtime or 0 for MVP)
+#   0x18  u64   initramfs_size
+#   0x20  u64   cmdline_phys
+#   0x28  u64   memmap_phys      (filled at runtime: &mm_buf)
+#   0x30  u32   memmap_count     (filled at runtime: mm_size / mm_dsz)
+#   0x34  u32   memmap_entsize   (filled at runtime: mm_dsz)
+#   0x38  u64   acpi_rsdp_phys   (0 for MVP; kernel doesn't read yet)
+#   0x40  u64   efi_st_phys      (filled at runtime: SystemTable*)
+#   0x48  tag[] type=0 END terminator (size=0 ok; walker stops at type==0)
+var boot_info[10] = {
+    # 0x00: magic = 0x41474E4F LE
+    0x4F, 0x4E, 0x47, 0x41,
+    # 0x04: version = 1
+    0x01, 0x00, 0x00, 0x00,
+    # 0x08: struct_size = 80 (0x50)
+    0x50, 0x00, 0x00, 0x00,
+    # 0x0C: flags = 0 (everything else zero via trailing-zero fill; END
+    #       tag at 0x48 is type=0 because trailing zeros put 0 there too)
+    0x00, 0x00, 0x00, 0x00
+};
 
-var li_out[1];         # LoadedImage*
-var sfs_out[1];        # SimpleFileSystem*
-var root_out[1];       # EFI_FILE_PROTOCOL* (volume root)
-var file_out[1];       # EFI_FILE_PROTOCOL* (the \boot\agnos file)
-var read_sz[1];        # IN: max read; OUT: actual read
-var read_buf[1];       # 8 bytes (we only need 4 for ELF magic)
+# === OUT slots + parse buffers ============================================
+
+var li_out[1];
+var sfs_out[1];
+var root_out[1];
+var file_out[1];
+var read_sz[1];
+var alloc_addr[1];
+var elf_hdr[8];
+var phdr[7];
+var mm_buf[2048];
+var mm_size[1];
+var mm_key[1];
+var mm_dsz[1];
+var mm_dver[1];
 
 
 # === Helpers ============================================================
@@ -98,49 +129,124 @@ fn efi_print(st, msg): i64 {
 # === Entry ============================================================
 
 fn efi_main(handle, st): i64 {
+    var bs       = load64(st + 0x60);
+    var fn_hp    = load64(bs + 0x98);
+    var fn_alloc = load64(bs + 0x28);
+    var fn_mmap  = load64(bs + 0x38);
+    var fn_ebs   = load64(bs + 0xE8);
+
+    # --- 1-2: HandleProtocol(LI) + HandleProtocol(SFS) ---
+    var rc = fncall3(fn_hp, handle, &li_guid, &li_out);
+    if (rc != 0) { efi_print(st, &msg_li_f); return 0; }
+    var li  = load64(&li_out);
+    var dev = load64(li + 0x18);
+
+    rc = fncall3(fn_hp, dev, &sfs_guid, &sfs_out);
+    if (rc != 0) { efi_print(st, &msg_sfs_f); return 0; }
+    var sfs        = load64(&sfs_out);
+    var fn_openvol = load64(sfs + 0x08);
+
+    # --- 3-4: OpenVolume + Open file ---
+    rc = fncall2(fn_openvol, sfs, &root_out);
+    if (rc != 0) { efi_print(st, &msg_vol_f); return 0; }
+    var root    = load64(&root_out);
+    var fn_open = load64(root + 0x08);
+
+    rc = fncall5(fn_open, root, &file_out, &path, 1, 0);
+    if (rc != 0) { efi_print(st, &msg_opn_f); return 0; }
+    var file      = load64(&file_out);
+    var fn_read   = load64(file + 0x20);
+    var fn_setpos = load64(file + 0x38);
+
+    # --- 5-7: Parse ELF + first program header ---
+    store64(&read_sz, 64);
+    rc = fncall3(fn_read, file, &read_sz, &elf_hdr);
+    if (rc != 0) { efi_print(st, &msg_rd_f); return 0; }
+    if (load8(&elf_hdr + 0) != 0x7F) { efi_print(st, &msg_elf_f); return 0; }
+
+    var e_phoff = load64(&elf_hdr + 0x20);
+
+    rc = fncall2(fn_setpos, file, e_phoff);
+    if (rc != 0) { efi_print(st, &msg_sp_f); return 0; }
+
+    store64(&read_sz, 56);
+    rc = fncall3(fn_read, file, &read_sz, &phdr);
+    if (rc != 0) { efi_print(st, &msg_rd_f); return 0; }
+    if (load8(&phdr + 0) != 1) { efi_print(st, &msg_pt_f); return 0; }
+
+    var p_offset = load64(&phdr +  8);
+    var p_paddr  = load64(&phdr + 24);
+    var p_filesz = load64(&phdr + 32);
+    var p_memsz  = load64(&phdr + 40);
+
+    # --- 8-10: AllocatePages + load segment ---
+    var pages = (p_memsz + 0xFFF) / 0x1000;
+    store64(&alloc_addr, p_paddr);
+    rc = fncall4(fn_alloc, 2, 2, pages, &alloc_addr);
+    if (rc != 0) { efi_print(st, &msg_ap_f); return 0; }
+
+    rc = fncall2(fn_setpos, file, p_offset);
+    if (rc != 0) { efi_print(st, &msg_sp_f); return 0; }
+
+    store64(&read_sz, p_filesz);
+    rc = fncall3(fn_read, file, &read_sz, p_paddr);
+    if (rc != 0) { efi_print(st, &msg_ld_f); return 0; }
+
+    if (load8(p_paddr + 0) != 0x7F) { efi_print(st, &msg_vfy_f); return 0; }
+    if (load8(p_paddr + 1) != 0x45) { efi_print(st, &msg_vfy_f); return 0; }
+    if (load8(p_paddr + 2) != 0x4C) { efi_print(st, &msg_vfy_f); return 0; }
+    if (load8(p_paddr + 3) != 0x46) { efi_print(st, &msg_vfy_f); return 0; }
+
+    # --- 11: Initial GetMemoryMap (informational; just to size the buffer) ---
+    store64(&mm_size, 16384);
+    rc = fncall5(fn_mmap, &mm_size, &mm_buf, &mm_key, &mm_dsz, &mm_dver);
+    if (rc != 0) { efi_print(st, &msg_mm_f); return 0; }
+
+    # --- Announce we're about to hand off (last text from gnoboot) ---
     efi_print(st, &msg_pre);
 
-    var bs    = load64(st + 0x60);                 # SystemTable->BootServices
-    var fn_hp = load64(bs + 0x98);                 # BootServices->HandleProtocol
+    # --- Fill sovereign boot-info dynamic fields ---
+    store64(&boot_info + 0x40, st);                    # efi_st_phys
+    store64(&boot_info + 0x28, &mm_buf);               # memmap_phys
 
-    # 1. Find LoadedImage on our own ImageHandle.
-    var rc = fncall3(fn_hp, handle, &li_guid, &li_out);
-    if (rc != 0) { efi_print(st, &msg_li_fail); return 0; }
+    # --- 12: Refresh GetMemoryMap RIGHT BEFORE ExitBootServices. Any
+    #         firmware service called between GetMemoryMap and EBS may
+    #         invalidate the key (allocator state changed). efi_print
+    #         above almost certainly did. The fresh call returns a valid
+    #         mm_key for the EBS that follows. No firmware service may
+    #         be called between this point and the EBS call below. ---
+    store64(&mm_size, 16384);
+    rc = fncall5(fn_mmap, &mm_size, &mm_buf, &mm_key, &mm_dsz, &mm_dver);
+    if (rc != 0) { efi_print(st, &msg_mm_f); return 0; }
 
-    # 2. Find SimpleFileSystem on the device handle the image was loaded from.
-    var li  = load64(&li_out);
-    var dev = load64(li + 0x18);                   # LoadedImage->DeviceHandle
-    rc = fncall3(fn_hp, dev, &sfs_guid, &sfs_out);
-    if (rc != 0) { efi_print(st, &msg_sfs_fail); return 0; }
+    var sz  = load64(&mm_size);
+    var dsz = load64(&mm_dsz);
+    store32(&boot_info + 0x30, sz / dsz);              # memmap_count
+    store32(&boot_info + 0x34, dsz);                   # memmap_entsize
 
-    # 3. OpenVolume → root EFI_FILE_PROTOCOL*.
-    var sfs        = load64(&sfs_out);
-    var fn_openvol = load64(sfs + 0x08);           # SFS->OpenVolume
-    rc = fncall2(fn_openvol, sfs, &root_out);
-    if (rc != 0) { efi_print(st, &msg_vol_fail); return 0; }
-
-    # 4. Open `\boot\agnos` (mode=READ=1, attrs=0).
-    var root    = load64(&root_out);
-    var fn_open = load64(root + 0x08);             # File->Open
-    rc = fncall5(fn_open, root, &file_out, &path, 1, 0);
-    if (rc != 0) { efi_print(st, &msg_open_fail); return 0; }
-
-    # 5. Read first 4 bytes.
-    var file    = load64(&file_out);
-    var fn_read = load64(file + 0x20);             # File->Read
-    store64(&read_sz, 4);
-    rc = fncall3(fn_read, file, &read_sz, &read_buf);
-    if (rc != 0) { efi_print(st, &msg_read_fail); return 0; }
-
-    # 6. Check ELF magic 7F 45 4C 46 (byte-by-byte; no load32 dependency).
-    var b0 = load8(&read_buf + 0);
-    var b1 = load8(&read_buf + 1);
-    var b2 = load8(&read_buf + 2);
-    var b3 = load8(&read_buf + 3);
-    if (b0 == 0x7F && b1 == 0x45 && b2 == 0x4C && b3 == 0x46) {
-        efi_print(st, &msg_elf);
-    } else {
-        efi_print(st, &msg_no_elf);
+    # --- 13: ExitBootServices — POINT OF NO RETURN ---
+    var key = load64(&mm_key);
+    rc = fncall2(fn_ebs, handle, key);
+    if (rc != 0) {
+        # Map key invalidated between GetMemoryMap and here. We can still
+        # try to print (firmware boot services likely partially alive) but
+        # don't trust further calls.
+        efi_print(st, &msg_ebs_f);
+        return 0;
     }
+
+    # --- Jump to kernel entry at 0x1000A8 with RDI = &boot_info ---
+    # Cyrius's `var p = &boot_info` emits `movabs rax, &boot_info` —
+    # leaves &boot_info in RAX for the asm below.
+    var p = &boot_info;
+    asm {
+        # mov rdi, rax     ; rdi = &boot_info (sovereign-struct ptr)
+        0x48; 0x89; 0xC7;
+        # mov eax, 0x1000A8 (zero-extends to rax = 0x00000000_001000A8)
+        0xB8; 0xA8; 0x00; 0x10; 0x00;
+        # jmp rax
+        0xFF; 0xE0;
+    }
+    # Unreachable — kernel never returns to gnoboot.
     return 0;
 }

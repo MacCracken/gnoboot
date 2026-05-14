@@ -19,8 +19,9 @@ gcc/clang/llvm; agnos replaced Linux) eats GRUB next.
 | 4a | Infrastructure probe — *retrospectively a misread*: capture was a no-op, print worked via firmware-preserved RDX. Lesson: top-level `var p = &foo; asm` doesn't work (cyrius reorders); use a fn or pure asm. | ⚠ 2026-05-13 (printed PASS, but capture was a no-op) |
 | 4 | `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &out)` returns EFI_SUCCESS — first MS x64 firmware call from gnoboot. Rewritten on cyrius 5.11.52 ergonomics: `fn efi_main` + byte-array literals + `fncall3`. | ✓ 2026-05-13 |
 | 5 | Open `\boot\agnos` via SimpleFileSystem, read first 4 bytes, check ELF magic | ✓ 2026-05-13 (5 firmware calls chained; "step 5: /boot/agnos magic = ELF" observed) |
-| 6 | GetMemoryMap, copy into sovereign-struct memmap | pending |
-| 7 | Build sovereign boot-info struct, ExitBootServices, jump to kernel entry | pending |
+| 5b | Parse ELF64 header + program header, AllocatePages at PT_LOAD's p_paddr (`0x100000`), copy 245 KB of file bytes into place, verify ELF magic at load addr | ✓ 2026-05-13 ("step 5b: kernel mapped at 0x100000 = ok" observed) |
+| 6 | GetMemoryMap into 16 KB buffer; capture map_key for later ExitBootServices | ✓ 2026-05-13 ("step 6: kernel @ 0x100000 + memmap = ok" observed) |
+| 7 | Build sovereign boot-info struct, ExitBootServices, jump to kernel entry — **point of no return** (console gone after EBS) | pending |
 | 5 | ELF64 parse + AllocatePages + LOAD-segment copy | pending |
 | 6 | GetMemoryMap | pending |
 | 7 | Sovereign boot-info struct build + ExitBootServices + jump | pending |

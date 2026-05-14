@@ -99,6 +99,47 @@ on the NUC AMD. v0.1.0 will not be tagged until both gates pass.
   `cyrius/docs/development/issues/2026-05-13-efi-main-trampoline-save-rex-wrong.md`.
   Remove the corrective asm once 5.11.53+ ships the fix.
 
+### Step 6 verified (2026-05-13)
+
+`tests/ovmf_smoke.sh` PASS:
+`step 6: kernel @ 0x100000 + memmap = ok` observed on ConOut.
+One additional firmware call (`bs->GetMemoryMap`) layered on top of
+Step 5b's full chain.
+
+GetMemoryMap state captured into globals for ExitBootServices later:
+`mm_buf[2048]` (16 KB; ~400 descriptors of slack — OVMF normally
+returns 30-80), `mm_size`, `mm_key`, `mm_dsz`, `mm_dver`. The
+`mm_key` is what `ExitBootServices(handle, mm_key)` will require —
+firmware rejects any stale snapshot key with EFI_INVALID_PARAMETER.
+
+### Step 5b verified (2026-05-13)
+
+`tests/ovmf_smoke.sh` PASS:
+`step 5b: kernel mapped at 0x100000 = ok` observed on ConOut. Full
+ELF64 load:
+
+1. Read ELF header (64 bytes from file offset 0), verify ELF magic.
+2. Extract `e_phoff` from offset 0x20 of the ELF header.
+3. `file->SetPosition(file, e_phoff)`, read first program header (56 B).
+4. Verify `p_type == 1` (PT_LOAD). AGNOS kernel ships with exactly
+   one PT_LOAD covering `.text` + `.rodata` + `.bss`.
+5. Read `p_paddr` (0x100000), `p_offset` (0), `p_filesz` (0x3D350),
+   `p_memsz` (0x4D350) from the program header.
+6. `bs->AllocatePages(AllocateAddress=2, EfiLoaderData=2,
+   pages=ceil(p_memsz/0x1000)=78, &p_paddr)` — fixed-address alloc
+   at 0x100000 succeeds on OVMF (firmware reserves below 1 MB but
+   not at the 1 MB mark itself).
+7. `file->SetPosition(file, p_offset)`, then
+   `file->Read(file, &size=p_filesz, p_paddr)` — 245 KB write
+   directly to physical 0x100000.
+8. Read back first 4 bytes from `0x100000`, compare to ELF magic
+   `7F 45 4C 46` — kernel is at the load address.
+
+Notable: OVMF doesn't gate the load-time write to AllocateAddress'd
+EfiLoaderData pages — the W^X "no-execute" enforcement only bites
+at the time of execution (Step 7's concern). For now, write
+succeeds cleanly.
+
 ### Step 5 verified on cyrius 5.11.53 (2026-05-13)
 
 `tests/ovmf_smoke.sh` PASS: `step 5: /boot/agnos magic = ELF`
