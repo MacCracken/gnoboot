@@ -2,35 +2,88 @@
 
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
+>
+> **Last refresh**: 2026-05-13 (v0.1.0 ship)
 
 ## Version
 
-**0.1.0** — scaffolded 2026-05-13 via `cyrius init`. No releases yet.
+**0.1.0** — released 2026-05-13. First gnoboot release. AGNOS MVP
+handoff verified end-to-end on QEMU OVMF.
 
 ## Toolchain
 
-- **Cyrius pin**: `5.11.47` (in `cyrius.cyml [package].cyrius`)
+- **Cyrius pin**: `5.11.53` (in `cyrius.cyml [package].cyrius`)
+- Required cyrius features:
+    - 5.11.49 — `_TARGET_EFI_APPLICATION` PE32+ EFI emit mode
+    - 5.11.51 — byte-array literal `var foo[N] = { 0x.., 0x.., ... };`
+    - 5.11.52 — `fn efi_main(handle, st)` auto-trampoline + lib/fnptr.cyr
+      TARGET_WIN branches under TARGET_EFI
+    - 5.11.53 — entry-save REX prefix hotfix (gnoboot agent filed)
+
+## Binary
+
+- **`build/BOOTX64.EFI`**: ~6 KB (PE32+ EFI Application, x86_64,
+  subsystem 0x000A, NX_COMPAT + DYNAMIC_BASE + HIGH_ENTROPY_VA,
+  `.reloc` populated)
+- **Entry**: cyrius e9 jmp prologue at `.text+0`, jumps to auto-trampoline
+  that captures `RCX → R14`, `RDX → R15`, then `call efi_main` (MS x64 ABI)
 
 ## Source
 
-Initial scaffold only.
+- `src/main.cyr` — single file, ~200 lines. UTF-16LE message constants,
+  EFI GUIDs (LoadedImage + SimpleFileSystem), `fn efi_print(st, msg)`,
+  `fn efi_main(handle, st)`. Entry trampoline auto-emitted by cyrius.
 
 ## Tests
 
-- `tests/gnoboot.tcyr` — primary suite (smoke + math; passes on `cyrius test`)
-- `tests/gnoboot.bcyr` — benchmark stub (no-op)
-- `tests/gnoboot.fcyr` — fuzz stub
+- `tests/verify_pe.sh` — fast structural gate (5 PE header fields).
+  Asserts DOS magic, PE sig, COFF Char (no RELOCS_STRIPPED), Subsystem
+  0x000A, DllChar NX_COMPAT bit set.
+- `tests/ovmf_smoke.sh` — runtime gate. Builds GPT-disk-with-ESP,
+  copies `BOOTX64.EFI` + optionally `/boot/agnos`, boots under
+  qemu-system-x86_64 + OVMF + `-cpu max`, greps ConOut serial. SKIPs
+  gracefully when tooling absent.
+
+## CI / Release
+
+- `.github/workflows/ci.yml` — every push + PR. Install cyrius
+  (canonical install.sh + post-install smoke per the agnos pattern),
+  build with `CYRIUS_TARGET_EFI=1`, run structural + OVMF gates,
+  upload `BOOTX64.EFI` as artifact.
+- `.github/workflows/release.yml` — `v?X.Y.Z` tag trigger. CI gate,
+  version-verify, build, publish `BOOTX64.EFI` + `gnoboot-X.Y.Z-x86_64-efi.efi`
+  + `SHA256SUMS` to GitHub release via `softprops/action-gh-release@v2`.
 
 ## Dependencies
 
 Direct (declared in `cyrius.cyml`):
 
-- stdlib — string, fmt, alloc, io, vec, str, syscalls, assert
+- stdlib — `lib/fnptr.cyr` (`fncall2`, `fncall3`, `fncall5` for MS x64
+  firmware-call dispatch). No other stdlib deps; UEFI Application is
+  freestanding.
 
 ## Consumers
 
-_None yet._
+- **agnos kernel** (≥ 1.30.0) — receives `RDI = &boot_info` via gnoboot's
+  Path C handoff. agnos 1.30.x boot-test CI fetches gnoboot's release
+  asset directly.
 
-## Next
+## Verified
 
-See [`roadmap.md`](roadmap.md).
+- **QEMU OVMF emulation** (2026-05-13): gnoboot loads agnos kernel
+  (251 KB ELF64) into `0x100000`, ExitBootServices succeeds, jumps with
+  `RDI = &boot_info`. Kernel prints banner + 9 init checkpoints
+  post-EBS through `Page tables: 1024MB mapped`.
+- **Iron Attempt 5 on NUC AMD** — pending (next gnoboot validation pass;
+  see agnosticos iron-boot log).
+
+## Open
+
+- **No agnos-kernel-side reading of `boot_info_ptr` yet** — kernel
+  stashes the pointer but doesn't dereference fields. Memmap walking,
+  cmdline, RSDP propagation are post-MVP. Tracked in agnos roadmap 1.30.x.
+- **Iron Attempt 5** — USB re-provision + NUC AMD reboot pending user.
+- **Scheduler-under-UEFI stall** (downstream of gnoboot; agnos issue)
+  — kernel reaches `Activating scheduler`, then `pt_init`/`apic_init`
+  fixed-physical assumptions break the post-scheduler path. Tracked
+  in [agnos state.md § Open investigation](https://github.com/MacCracken/agnos/blob/main/docs/development/state.md).
