@@ -154,6 +154,22 @@ fn efi_print(st, msg): i64 {
 # === Entry ============================================================
 
 fn efi_main(handle, st): i64 {
+    # === CMOS gnoboot checkpoint 1 (efi_main entered) + magic 0xCD ===
+    # Pairs with agnos kernel's CMOS scheme (boot_shim writes CMOS[0x40]
+    # = checkpoint, CMOS[0x41] = 0xAB magic). Gnoboot uses CMOS[0x42] /
+    # CMOS[0x43] so the two scopes don't overwrite each other. Decoded
+    # by agnosticos/scripts/read-boot-log.sh.
+    #
+    # Iron has no serial wiring (single-machine dev setup); CMOS is
+    # battery-backed and survives the reset that follows a fault, so
+    # this is the only post-mortem channel for "where did the boot die"
+    # when nothing reaches the framebuffer. Per-write is 8 bytes,
+    # clobbers AL only.
+    asm {
+        0xB0; 0x43; 0xE6; 0x70; 0xB0; 0xCD; 0xE6; 0x71;    # CMOS[0x43] = 0xCD (magic)
+        0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x01; 0xE6; 0x71;    # CMOS[0x42] = 1   (efi_main entered)
+    }
+
     var bs        = load64(st + 0x60);
     var fn_hp     = load64(bs + 0x98);
     var fn_alloc  = load64(bs + 0x28);
@@ -171,6 +187,9 @@ fn efi_main(handle, st): i64 {
     if (rc != 0) { efi_print(st, &msg_sfs_f); return 0; }
     var sfs        = load64(&sfs_out);
     var fn_openvol = load64(sfs + 0x08);
+
+    # === CMOS gnoboot checkpoint 2 (ESP located: HP(LI)+HP(SFS) ok) ===
+    asm { 0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x02; 0xE6; 0x71; }
 
     # --- 3-4: OpenVolume + Open file ---
     rc = fncall2(fn_openvol, sfs, &root_out);
@@ -228,6 +247,9 @@ fn efi_main(handle, st): i64 {
     if (load8(p_paddr + 1) != 0x45) { efi_print(st, &msg_vfy_f); return 0; }
     if (load8(p_paddr + 2) != 0x4C) { efi_print(st, &msg_vfy_f); return 0; }
     if (load8(p_paddr + 3) != 0x46) { efi_print(st, &msg_vfy_f); return 0; }
+
+    # === CMOS gnoboot checkpoint 3 (kernel ELF mapped + magic verified) ===
+    asm { 0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x03; 0xE6; 0x71; }
 
     # --- 10b: Zero BSS gap [p_filesz, p_memsz). ELF semantics require
     # [end-of-file-image, end-of-memory-image) to be zero; UEFI
@@ -307,6 +329,11 @@ fn efi_main(handle, st): i64 {
     store32(&boot_info + 0x30, sz / dsz);              # memmap_count
     store32(&boot_info + 0x34, dsz);                   # memmap_entsize
 
+    # === CMOS gnoboot checkpoint 4 (memmap fresh, pre-EBS) ===
+    # If readback shows CMOS[0x42]=4 + CMOS[0x41]!=0xAB, ExitBootServices
+    # itself failed (or faulted) — invalid mm_key is the most common cause.
+    asm { 0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x04; 0xE6; 0x71; }
+
     # --- 13: ExitBootServices — POINT OF NO RETURN ---
     var key = load64(&mm_key);
     rc = fncall2(fn_ebs, handle, key);
@@ -323,6 +350,17 @@ fn efi_main(handle, st): i64 {
     # leaves &boot_info in RAX for the asm below.
     var p = &boot_info;
     asm {
+        # === CMOS gnoboot checkpoint 5 (post-EBS, immediately pre-jmp) ===
+        # MUST clobber AL only; mov/out preserves RAX-the-pointer because
+        # the `mov al, 0x42` only writes the low byte of RAX. The CMOS
+        # writes happen AFTER ExitBootServices, so no firmware service
+        # is invoked — pure port I/O is safe. If readback shows
+        # CMOS[0x42]=5 + CMOS[0x41]!=0xAB, the jmp executed but the
+        # kernel's first instruction (CMOS magic write) faulted.
+        # 8+8 = 16 bytes; clobbers AL only.
+        0x50;                                  # push rax (save &boot_info)
+        0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x05; 0xE6; 0x71;    # CMOS[0x42] = 5
+        0x58;                                  # pop rax  (restore &boot_info)
         # mov rdi, rax     ; rdi = &boot_info (sovereign-struct ptr)
         0x48; 0x89; 0xC7;
         # mov eax, 0x1000A8 (zero-extends to rax = 0x00000000_001000A8)
