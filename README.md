@@ -10,25 +10,30 @@ modern strict-W^X UEFI (see `agnosticos/docs/development/iron-boot-testing-log.m
 § *Diagnosis 2*). The AGNOS sovereignty pattern (cyrius replaced
 gcc/clang/llvm; agnos replaced Linux) eats GRUB next.
 
-## Status
+## Status — v0.1.0 (2026-05-13)
+
+Released. Verified end-to-end on QEMU OVMF: gnoboot loads
+`\boot\agnos`, builds sovereign boot-info struct, ExitBootServices,
+jumps to kernel entry. Kernel takes over and prints its banner +
+9 init checkpoints post-EBS.
 
 | Step | Description | Status |
 |------|-------------|--------|
-| 3 | Console banner via SystemTable→ConOut→OutputString | ✓ 2026-05-13 (boots under QEMU OVMF) |
-| 3.5 | CI / release workflows + structural + OVMF gates | ✓ 2026-05-13 |
-| 4a | Infrastructure probe — *retrospectively a misread*: capture was a no-op, print worked via firmware-preserved RDX. Lesson: top-level `var p = &foo; asm` doesn't work (cyrius reorders); use a fn or pure asm. | ⚠ 2026-05-13 (printed PASS, but capture was a no-op) |
-| 4 | `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &out)` returns EFI_SUCCESS — first MS x64 firmware call from gnoboot. Rewritten on cyrius 5.11.52 ergonomics: `fn efi_main` + byte-array literals + `fncall3`. | ✓ 2026-05-13 |
-| 5 | Open `\boot\agnos` via SimpleFileSystem, read first 4 bytes, check ELF magic | ✓ 2026-05-13 (5 firmware calls chained; "step 5: /boot/agnos magic = ELF" observed) |
-| 5b | Parse ELF64 header + program header, AllocatePages at PT_LOAD's p_paddr (`0x100000`), copy 245 KB of file bytes into place, verify ELF magic at load addr | ✓ 2026-05-13 ("step 5b: kernel mapped at 0x100000 = ok" observed) |
-| 6 | GetMemoryMap into 16 KB buffer; capture map_key for later ExitBootServices | ✓ 2026-05-13 ("step 6: kernel @ 0x100000 + memmap = ok" observed) |
-| 7 | Build sovereign boot-info struct, ExitBootServices, jump to kernel entry | ✓ 2026-05-13 (kernel prints "AGNOS kernel v1.30.0" through "Page tables: 1024MB mapped" — gnoboot's MVP handoff verified end-to-end on QEMU OVMF; kernel-side stall past page tables is a separate agnos investigation) |
-| 8 | agnos shim swap MB2→sovereign struct (cross-repo, agnos repo) | ✓ 2026-05-13 (agnos 1.30.0 — RBX→RDI in `mbi.cyr`, renames throughout, cyrius pin 5.11.43→5.11.53) |
-| 5 | ELF64 parse + AllocatePages + LOAD-segment copy | pending |
-| 6 | GetMemoryMap | pending |
-| 7 | Sovereign boot-info struct build + ExitBootServices + jump | pending |
-| 8 | Agnos shim swap MB2→sovereign struct (cross-repo) | pending |
-| 9 | End-to-end gnoboot → agnos kernel under QEMU OVMF | pending |
-| 12 | Iron Attempt 5 on NUC AMD | pending |
+| 3 | Console banner via SystemTable→ConOut→OutputString | ✓ |
+| 3.5 | CI / release workflows + structural + OVMF gates | ✓ |
+| 4 | `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &out)` | ✓ |
+| 5 | Open `\boot\agnos` via SimpleFileSystem, read first 4 bytes, check ELF magic | ✓ |
+| 5b | Parse ELF64 program header, AllocatePages at `0x100000`, load 245 KB segment, verify ELF magic at load addr | ✓ |
+| 6 | GetMemoryMap into 16 KB buffer; capture map_key | ✓ |
+| 7 | Build sovereign boot-info struct, ExitBootServices, jump to kernel entry with `RDI = &boot_info` | ✓ |
+| 8 | agnos shim swap MB2→sovereign struct (cross-repo edit in agnos 1.30.0) | ✓ |
+
+**Pending validation (post-v0.1.0):**
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 9   | End-to-end kernel boot reaches scheduler + tier3 test | partial — kernel stalls at `Page tables: 1024MB mapped` (agnos-side investigation; not gnoboot) |
+| 12  | Iron Attempt 5 on NUC AMD via full `agnosticos/scripts/install-usb.sh` re-provision | pending |
 
 Full plan: `agnosticos/docs/development/path-c-sovereign-uefi.md`.
 

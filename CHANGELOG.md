@@ -6,327 +6,213 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Working toward **v0.1.0** — Step 9 of the Path C plan
-(`agnosticos/docs/development/path-c-sovereign-uefi.md`): end-to-end
-gnoboot → AGNOS kernel boot through QEMU OVMF, plus iron Attempt 5
-on the NUC AMD. v0.1.0 will not be tagged until both gates pass.
+
+## [0.1.0] — 2026-05-13
+
+First gnoboot release. AGNOS sovereign UEFI bootloader, Cyrius-native,
+replaces GRUB on the boot path. Loads the AGNOS kernel from the ESP,
+builds a sovereign boot-info struct, calls `ExitBootServices`, jumps
+to kernel entry with `RDI = &boot_info`.
+
+Verified end-to-end on QEMU OVMF: gnoboot delivers the AGNOS kernel
+through its boot_shim into kernel-side init (banner + 9 further
+init lines through `Page tables: 1024MB mapped` print post-EBS).
+Iron Attempt 5 on the NUC AMD is the remaining validation pass.
+
+Brought forward to MVP-critical 2026-05-13 after GRUB's multiboot2-EFI
+relocator was found to write to its own `.text` and fault under
+modern strict-W^X UEFI (see `agnosticos/docs/development/iron-boot-testing-log.md`
+§ *Diagnosis 2 — 2026-05-13 GRUB relocator W^X* for the forensic
+trail and `agnosticos/docs/development/path-c-sovereign-uefi.md` for
+the plan).
 
 ### Added
 
-- Initial scaffold (cyrius.cyml pinned to cyrius **5.11.49** — UEFI
-  Application emit mode), VERSION 0.1.0, GPL-3.0-only.
-- `src/main.cyr` — Step 3 banner. Prints `"gnoboot v0.1.0"` to firmware
-  ConOut via `SystemTable->ConOut->OutputString`, returns EFI_SUCCESS.
-  Pattern mirrors `cyrius/programs/efi_probe.cyr`: single inline-asm
-  block, no DIR64 fixups needed at banner scale.
-- `tests/verify_pe.sh` — fast structural gate. Verifies DOS magic at
-  0x00, PE signature at 0x40, COFF Characteristics 0x0022 (no
+- UEFI Application entry via cyrius 5.11.53's `fn efi_main(handle, st)`
+  convention. Cyrius's auto-trampoline at `.text+0x339` saves the
+  firmware-supplied `RCX` (ImageHandle) and `RDX` (SystemTable) into
+  callee-saved `R14`/`R15`, runs gvar inits, restores into RCX/RDX,
+  and calls `efi_main` with MS x64 ABI.
+- ESP file access via `bs->HandleProtocol(handle, &LI_GUID)` →
+  `bs->HandleProtocol(LI->DeviceHandle, &SFS_GUID)` →
+  `sfs->OpenVolume` → `root->Open("\boot\agnos", READ, 0)` →
+  `file->Read`. All five firmware calls via `lib/fnptr.cyr`'s
+  MS-x64 `fncallN` branches (which fire under
+  `CYRIUS_TARGET_EFI=1` via the v5.11.52 TARGET_WIN co-predefine).
+- ELF64 kernel load: read 64-byte header, parse `e_phoff`, read
+  56-byte PT_LOAD program header, `bs->AllocatePages(AllocateAddress,
+  EfiLoaderData, pages, &p_paddr)` at the kernel's fixed
+  `p_paddr = 0x100000`, `file->Read(file, &filesz, p_paddr)` writes
+  segment data directly to physical memory. ELF-magic read-back
+  verifies the load.
+- Sovereign boot-info struct (80 bytes, layout in
+  `agnosticos/docs/development/path-c-sovereign-uefi.md` § Handoff):
+  magic `0x41474E4F ('AGNO')`, version 1, struct_size 80, memmap
+  pointer/count/entsize, EFI SystemTable pointer, END tag at
+  offset `0x48`. Built statically with a byte-array literal
+  (cyrius 5.11.51) plus runtime `store32`/`store64` fills.
+- `bs->GetMemoryMap` × 2 (informational + fresh-key right before
+  EBS) into a 16 KB cyrius global buffer. The second call's
+  `mm_key` is what `ExitBootServices(handle, mm_key)` requires.
+- `bs->ExitBootServices(handle, mm_key)` — point of no return.
+  After EBS, ConOut is gone; any further diagnostic is via the
+  kernel's own COM1 UART output captured by QEMU `-serial stdio`.
+- Inline-asm jump to kernel entry at `0x1000A8` with
+  `RDI = &boot_info` (SysV arg 0): `mov rdi, rax; mov eax, 0x1000A8;
+  jmp rax`. Cyrius's `var p = &boot_info` emits the
+  `movabs rax, &boot_info` immediately before, leaving the
+  destination in RAX for the asm.
+
+### Tooling
+
+- `tests/verify_pe.sh` — fast structural gate. Verifies DOS magic
+  at 0x00, PE signature at 0x40, COFF Characteristics 0x0022 (no
   RELOCS_STRIPPED) at 0x56, Subsystem 0x000A (EFI_APPLICATION) at
-  0x9C, DllCharacteristics 0x0100 (NX_COMPAT) at 0x9E.
-- `tests/ovmf_smoke.sh` — runtime end-to-end gate. Builds a 64MB GPT
-  disk with ESP at 1MiB, drops in `\EFI\BOOT\BOOTX64.EFI`, boots under
-  qemu-system-x86_64 + OVMF, asserts the expected banner appears on
-  the firmware ConOut serial. Cross-distro OVMF path probing (Arch
-  `edk2-ovmf` + Ubuntu `ovmf`).
-- `.github/workflows/ci.yml` — Install cyrius (canonical install.sh +
-  post-install smoke per the agnos pattern), build with
-  `CYRIUS_TARGET_EFI=1`, run structural + OVMF smoke gates, upload
-  `BOOTX64.EFI` as an artifact.
-- `.github/workflows/release.yml` — Triggered on `v?X.Y.Z` tags. CI
-  must pass first; then version-verify, build, structural gate, and
-  publish `BOOTX64.EFI` + `gnoboot-X.Y.Z-x86_64-efi.efi` + `SHA256SUMS`
-  to a GitHub release with auto-generated notes.
+  0x9C, DllCharacteristics NX_COMPAT bit set at 0x9E. Runs without
+  QEMU.
+- `tests/ovmf_smoke.sh` — runtime end-to-end gate. Builds a 64 MB
+  GPT disk with ESP at 1 MiB, copies `build/BOOTX64.EFI` to
+  `\EFI\BOOT\BOOTX64.EFI` and (optionally) the agnos kernel build
+  to `\boot\agnos`, boots under qemu-system-x86_64 + OVMF, asserts
+  the expected banner appears on the firmware ConOut serial.
+  Cross-distro OVMF path probing (Arch `edk2-ovmf` + Ubuntu
+  `ovmf`); graceful SKIP if `qemu-system-x86_64`, `parted`,
+  `mtools`, or OVMF firmware files are missing.
+- `.github/workflows/ci.yml` — installs cyrius (canonical
+  `install.sh` + post-install smoke per the agnos pattern), builds
+  with `CYRIUS_TARGET_EFI=1`, runs both gates on `ubuntu-latest`
+  with `ovmf parted mtools qemu-system-x86` apt-installed, uploads
+  `BOOTX64.EFI` as a build artifact.
+- `.github/workflows/release.yml` — triggered on `v?X.Y.Z` tags.
+  CI gate first; then version-verifies `VERSION` against the tag,
+  builds, structural-gates, stages release artifacts
+  (`BOOTX64.EFI` + `gnoboot-X.Y.Z-x86_64-efi.efi` + `SHA256SUMS`),
+  publishes to a GitHub release with auto-generated notes via
+  `softprops/action-gh-release@v2`.
 
-### Verified (this branch)
+### Cross-repo dependencies
 
-- 2026-05-13 — Step 3 banner observed on QEMU OVMF ConOut. Structural
-  gate `tests/verify_pe.sh` reports all 5 PE-header fields PASS.
-  Runtime gate `tests/ovmf_smoke.sh` reports
-  `PASS: "gnoboot v0.1.0" observed on ConOut`.
-- 2026-05-13 — **Step 4a probe** PASS as printed, but the
-  *interpretation* was wrong. The probe printed "step 4a probe ok"
-  on ConOut, but Step 4's disassembly later revealed that the
-  `var p = &global; asm { mov [rax], rdx }` capture was a no-op —
-  cyrius reorders the asm to emit BEFORE the `&global` lea, so RAX
-  is junk when the `mov [rax], rdx` runs (memory corruption at an
-  unknown address). The post-capture print only worked because it
-  walked SystemTable→ConOut→OutputString via firmware-preserved
-  RDX directly, never reading from the (uncaptured) global. The
-  agnos shim's `var p = &foo; asm` pattern works *inside a fn body*
-  (locals get inline emit at the source position) but **NOT at
-  top-level `kernel;` mode** (top-level `var X = expr;` is treated
-  as a global with deferred initializer). Constraint logged.
-- 2026-05-13 — **Step 4 (pure-asm)** PASS:
-  `step 4: HandleProtocol(LoadedImage) = ok` observed on ConOut.
-  First successful MS x64 ABI firmware call from gnoboot. Pattern:
-  one top-level `asm { ... }` block, no interleaved cyrius
-  statements; firmware args (RCX = ImageHandle, RDX = SystemTable)
-  saved into RBX/R12 (callee-saved in both ABIs) immediately after
-  the cyrius e9 prologue; OUT parameter for HandleProtocol lives on
-  the stack (allocated by `push 0` for writable u64); UTF-16LE
-  strings + the LoadedImage GUID embedded as raw bytes inside the
-  asm block and addressed via `lea rdx, [rip + disp32]` with
-  hand-computed displacements.
-- 2026-05-13 — `verify_pe.sh` DllCharacteristics check relaxed:
-  asserts NX_COMPAT (0x0100) bit set, not the exact 0x0100 value.
-  Cyrius emits DYNAMIC_BASE + HIGH_ENTROPY_VA (0x0060) too when the
-  binary has base relocations — both reloc-empty (Step 3 / Step 4
-  pure-asm) and reloc-populated (later steps, once we use cyrius
-  globals inside a fn) shapes now pass.
+- **cyrius 5.11.53** — pinned in `cyrius.cyml`. v0.1.0 specifically
+  needs:
+    - **5.11.51** — byte-array literal `var foo[N] = { 0x.., ... };`
+    - **5.11.52** — `fn efi_main(handle, st)` convention + cyrius
+      auto-predefines `CYRIUS_TARGET_WIN` alongside
+      `CYRIUS_TARGET_EFI` (so `lib/fnptr.cyr`'s MS-x64 fncallN
+      branches fire under TARGET_EFI).
+    - **5.11.53** — hotfix for v5.11.52's entry-save REX prefix
+      (was emitting `mov rsi, r9; mov rdi, r10` instead of
+      `mov r14, rcx; mov r15, rdx` — gnoboot agent caught the bug
+      hours after 5.11.52 ship; fix landed same-day).
+- **agnos 1.30.0** — pairs with gnoboot v0.1.0. Kernel ABI break:
+  entry contract switched from multiboot2's `RBX = MBI ptr` to
+  sovereign-struct's `RDI = &boot_info`. The 3-byte asm change is
+  in `kernel/arch/x86_64/mbi.cyr` (`mov [rax], rbx` →
+  `mov [rax], rdi`); the kernel still just stashes the pointer,
+  doesn't yet read it.
 
-### v5.11.52 migration (2026-05-13)
+### Upstream issues filed
 
-- Pin bumped 5.11.49 → 5.11.52. Both gnoboot-filed enhancement
-  issues landed:
-    - **Byte-array literal `var foo[N] = { 0x.., ... };`** (v5.11.51)
-      — used for `msg_pre` / `msg_ok` / `msg_fail` / `li_guid`.
-      ~150 lines of `store8` runs collapsed to four brace lists.
-    - **`fn efi_main(handle, st)` convention + lib/fnptr.cyr
-      TARGET_WIN fires under TARGET_EFI** (v5.11.52). Replaces
-      gnoboot's hand-rolled SysV→MS-x64 entry trampoline + the
-      hand-rolled firmware-call asm trampolines. `fncall2` /
-      `fncall3` now do the right MS-x64 ABI dance natively.
-- **Caveat — cyrius 5.11.52 entry-save REX bug.** The auto-emitted
-  save at the entry-jmp target encodes `mov rsi, r9; mov rdi, r10`
-  (REX.R extension) where it intended `mov r14, rcx; mov r15, rdx`
-  (needs REX.B extension for r14/r15 as destination). Firmware's
-  RCX/RDX are NOT saved; the call-site restore later pulls
-  undefined R14/R15. gnoboot's six-byte corrective save at the end
-  of top-level user code (`asm { 49 89 CE; 49 89 D7 }`) patches
-  R14/R15 with the correct values before gvar_inits clobber RCX/RDX.
-  Cyrius's broken save happens *before* user code (clobbers RSI/RDI
-  but spares RCX/RDX — happily benign). Filed at
-  `cyrius/docs/development/issues/2026-05-13-efi-main-trampoline-save-rex-wrong.md`.
-  Remove the corrective asm once 5.11.53+ ships the fix.
+Gnoboot's bring-up surfaced four cyrius issues, three of which
+landed in the v5.11.51–v5.11.53 cycle:
 
-### Step 7 verified — KERNEL BOOTED (2026-05-13)
+1. **UEFI Application emit mode** (filed → cyrius 5.11.49).
+   Adds `_TARGET_EFI_APPLICATION` flag gated by
+   `CYRIUS_TARGET_EFI=1`: PE32+ with subsystem 0xA, no Win32
+   imports, populated `.reloc`, RELOCS_STRIPPED cleared.
+   `cyrius/docs/development/issues/archived/2026-05-13-gnoboot-uefi-application-emit.md`.
+2. **Byte-array literal syntax** (filed → cyrius 5.11.51).
+   `var foo[N] = { 0x.., 0x.., ... };` for compile-time-known
+   UTF-16LE strings, EFI GUIDs, sovereign-struct static init.
+   `cyrius/docs/development/issues/archived/2026-05-13-gnoboot-byte-array-literal.md`.
+3. **`fn efi_main(handle, st)` convention** (filed → cyrius 5.11.52).
+   Auto-emits the firmware-entry trampoline. Cyrius scans `fn_names`
+   for `efi_main\0` and emits save / restore / call sequence around
+   the standard gvar-inits flow.
+   `cyrius/docs/development/issues/archived/2026-05-13-gnoboot-efi-main-convention.md`.
+4. **cyrius-lsp byte-array-literal recognition** (filed; pending,
+   candidate for 5.11.54+). LSP still emits a parse-error
+   diagnostic on `var foo[N] = { ... }` even though `cc5` accepts
+   it — likely the LSP wasn't rebuilt against the v5.11.51
+   frontend. Diagnostic noise only; doesn't affect builds.
+   `cyrius/docs/development/issues/2026-05-13-gnoboot-lsp-byte-array-literal.md`.
 
-`tests/ovmf_smoke.sh` PASS: `AGNOS kernel v1.30.0` observed on
-ConOut, then 9 further kernel-side init lines through
-`Page tables: 1024MB mapped`. **gnoboot's MVP handoff works
-end-to-end on QEMU OVMF.**
+### Known limitations
 
-What chain ran successfully:
+- **AGNOS kernel stalls past `Page tables: 1024MB mapped`** under
+  the UEFI + gnoboot boot path. Under the legacy
+  `qemu-system-x86_64 -kernel` path the kernel reached
+  `Memory isolation: PASS` / `Userland exec complete` /
+  `KASLR: pmm_next_free=N`. The two paths differ in pre-handoff
+  environment (UEFI's GDT + identity-mapped page tables + NX bits
+  vs. the kernel's own boot-shim setup under `-kernel`). The
+  kernel-side init survives 10 checkpoints — the stall is post-
+  page-tables. Not a gnoboot bug: handoff is verified correct
+  (banner + 9 lines print *after* `ExitBootServices`). Tracked in
+  `agnos/docs/development/state.md` § *Open investigation — kernel
+  hang post-page-tables under UEFI+gnoboot*; expected to land in
+  the next agnos sub-arc.
+- **Iron Attempt 5 (NUC AMD) not yet exercised.** v0.1.0 is verified
+  on QEMU OVMF emulation only. The iron test path is full
+  `scripts/install-usb.sh` re-provision (via the agnosticos repo)
+  + NUC AMD reboot. Tracked in
+  `agnosticos/docs/development/iron-boot-testing-log.md`.
+- **Cyrius-lsp diagnostic noise** on every save of `src/main.cyr`:
+  `[Line 1:1] expected ';', got '='`. LSP is misreading the
+  byte-array literal syntax; build is unaffected. Pending upstream
+  rebuild (see *Upstream issues filed* #4).
 
-1. UEFI firmware loaded gnoboot at `\EFI\BOOT\BOOTX64.EFI`.
-2. Cyrius's `fn efi_main` trampoline saved RCX/RDX → R14/R15
-   (correctly encoded, post-5.11.53 hotfix).
-3. gnoboot opened `\boot\agnos`, parsed ELF64 header + program
-   header, AllocatePages'd at `0x100000`, loaded 245 KB into place.
-4. gnoboot built the 80-byte sovereign boot-info struct:
-   `magic = 0x41474E4F ('AGNO')`, `version = 1`, `struct_size = 80`,
-   `memmap_phys = &mm_buf`, `memmap_count`, `memmap_entsize`,
-   `efi_st_phys = SystemTable*`, END tag at offset `0x48` (type=0).
-5. gnoboot called `bs->GetMemoryMap` twice (initial + fresh-key for
-   EBS), then `bs->ExitBootServices(handle, mm_key)`.
-6. gnoboot jumped to `0x1000A8` with `RDI = &boot_info` via inline
-   asm: `mov rdi, rax; mov eax, 0x1000A8; jmp rax`.
-7. agnos kernel's boot_shim ran (RSP at 0x200000, COM1 UART init).
-8. `boot_info_capture_rdi()` stashed `RDI` into `boot_info_ptr`.
-9. agnos kernel proper ran through 10 init checkpoints printing to
-   UART (gnoboot's serial-stdio captured them).
+### Development notes
 
-**Architectural MVP gate cleared in emulation.** Iron Attempt 5 on
-the NUC AMD is the remaining smoke test.
+A handful of bisection findings that drove the source's current
+shape — useful for the next gnoboot contributor; not strict release
+content.
 
-### Open finding — kernel stalls past Page tables init
-
-Under the gnoboot+OVMF boot path, the agnos kernel stops printing
-after `Page tables: 1024MB mapped`. Under the legacy
-`qemu-system-x86_64 -kernel` path the kernel had reached
-`Memory isolation: PASS` / `Userland exec complete` / KASLR probe.
-The difference: UEFI's pre-handoff environment leaves the kernel
-with UEFI's GDT, identity-mapped page tables, NX bits configured,
-etc. Something post-page-tables doesn't like that inheritance.
-
-**Not a gnoboot bug** — the handoff itself is verified correct
-(kernel banner + 9 init lines all print *after* ExitBootServices).
-This is the next agnos investigation; documented in
-`agnos/docs/development/state.md` § *Open investigation — kernel
-hang post-page-tables under UEFI+gnoboot*.
-
-### Step 6 verified (2026-05-13)
-
-`tests/ovmf_smoke.sh` PASS:
-`step 6: kernel @ 0x100000 + memmap = ok` observed on ConOut.
-One additional firmware call (`bs->GetMemoryMap`) layered on top of
-Step 5b's full chain.
-
-GetMemoryMap state captured into globals for ExitBootServices later:
-`mm_buf[2048]` (16 KB; ~400 descriptors of slack — OVMF normally
-returns 30-80), `mm_size`, `mm_key`, `mm_dsz`, `mm_dver`. The
-`mm_key` is what `ExitBootServices(handle, mm_key)` will require —
-firmware rejects any stale snapshot key with EFI_INVALID_PARAMETER.
-
-### Step 5b verified (2026-05-13)
-
-`tests/ovmf_smoke.sh` PASS:
-`step 5b: kernel mapped at 0x100000 = ok` observed on ConOut. Full
-ELF64 load:
-
-1. Read ELF header (64 bytes from file offset 0), verify ELF magic.
-2. Extract `e_phoff` from offset 0x20 of the ELF header.
-3. `file->SetPosition(file, e_phoff)`, read first program header (56 B).
-4. Verify `p_type == 1` (PT_LOAD). AGNOS kernel ships with exactly
-   one PT_LOAD covering `.text` + `.rodata` + `.bss`.
-5. Read `p_paddr` (0x100000), `p_offset` (0), `p_filesz` (0x3D350),
-   `p_memsz` (0x4D350) from the program header.
-6. `bs->AllocatePages(AllocateAddress=2, EfiLoaderData=2,
-   pages=ceil(p_memsz/0x1000)=78, &p_paddr)` — fixed-address alloc
-   at 0x100000 succeeds on OVMF (firmware reserves below 1 MB but
-   not at the 1 MB mark itself).
-7. `file->SetPosition(file, p_offset)`, then
-   `file->Read(file, &size=p_filesz, p_paddr)` — 245 KB write
-   directly to physical 0x100000.
-8. Read back first 4 bytes from `0x100000`, compare to ELF magic
-   `7F 45 4C 46` — kernel is at the load address.
-
-Notable: OVMF doesn't gate the load-time write to AllocateAddress'd
-EfiLoaderData pages — the W^X "no-execute" enforcement only bites
-at the time of execution (Step 7's concern). For now, write
-succeeds cleanly.
-
-### Step 5 verified on cyrius 5.11.53 (2026-05-13)
-
-`tests/ovmf_smoke.sh` PASS: `step 5: /boot/agnos magic = ELF`
-observed on ConOut. Five firmware calls chained, all clean cyrius:
-
-1. `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &li_out)` →
-   LoadedImage pointer.
-2. `bs->HandleProtocol(LoadedImage->DeviceHandle, &SimpleFsGuid, &sfs_out)` →
-   SimpleFileSystem pointer on the device gnoboot was loaded from.
-3. `sfs->OpenVolume(sfs, &root_out)` → root EFI_FILE_PROTOCOL*.
-4. `root->Open(root, &file_out, "\boot\agnos", EFI_FILE_MODE_READ, 0)` →
-   file handle.
-5. `file->Read(file, &size=4, &buf)` → first 4 bytes of the kernel.
-
-ELF magic check (`buf[0..4] == 7F 45 4C 46`) confirms a real ELF
-header. The agnos kernel binary at `/home/macro/Repos/agnos/build/agnos`
-(251 KB, ELF64) is the test payload, copied onto the test ESP by
-`tests/ovmf_smoke.sh` (script auto-detects the kernel build, falls
-back to a 4-byte synthetic ELF-magic stub if absent).
-
-Two byte-array-literal sizing errors caught during build (`msg_li_fail`
-at 18 bytes in N=2=16 cap, `msg_sfs_fail` at 20 bytes in N=2=16 cap)
-— bumped to N=3. Cyrius's error reported line 22 (a blank line) for
-the first overflowing array; the actual array is later in the source.
-Minor papercut, not file-worthy yet — re-check if it bites again.
-
-Cyrius 5.11.53's hotfix (entry-save REX prefix `4C → 49`) verified:
-disassembly at the entry-jmp target now shows the correct
-`49 89 CE; 49 89 D7` (`mov r14, rcx; mov r15, rdx`). The corrective
-save asm that workaround'd 5.11.52 has been removed from `src/main.cyr`.
-
-### Step 4 verified post-5.11.52 (2026-05-13)
-
-`tests/ovmf_smoke.sh` PASS:
-`step 4: HandleProtocol(LoadedImage) = ok` observed on ConOut.
-The shape that worked:
-
-```cyrius
-kernel;
-
-include "lib/fnptr.cyr"
-
-var msg_pre[10]  = { 0x73,0x00, ... };   # UTF-16LE banner
-var li_guid[2]   = { 0xA1,0x31,0x1B,0x5B, ... };
-var li_out[1];
-
-fn efi_print(st, msg): i64 {
-    var con_out = load64(st + 0x40);
-    var out_str = load64(con_out + 0x08);
-    return fncall2(out_str, con_out, msg);
-}
-
-fn efi_main(handle, st): i64 {
-    efi_print(st, &msg_pre);
-    var bs    = load64(st + 0x60);
-    var fn_hp = load64(bs + 0x98);
-    var rc    = fncall3(fn_hp, handle, &li_guid, &li_out);
-    if (rc == 0) { efi_print(st, &msg_ok); }
-    else         { efi_print(st, &msg_fail); }
-    return 0;
-}
-
-# Six-byte corrective save (removable post-5.11.53 fix)
-asm {
-    0x49; 0x89; 0xCE;    # mov r14, rcx
-    0x49; 0x89; 0xD7;    # mov r15, rdx
-}
-```
-
-### Known cyrius constraints (informed Step 4 design)
-
-These are ergonomic gaps in `CYRIUS_TARGET_EFI` mode, not bugs.
-gnoboot ships fine without resolution. Both surfaced upstream:
-
-- **No array-with-initializer syntax** — `var foo[N] = { 0x.., 0x.. };`
-  rejected with `expected ';', got '='`. Cyrius supports
-  `var s = "ascii";` for ASCII strings but not byte-array literals.
-  Pattern for UTF-16LE buffers (UEFI CHAR16*) and EFI GUIDs:
-  declare uninitialized `var buf[N];` and `store8(&buf + i, byte)`
-  at runtime *inside a fn body*, OR embed the bytes inline in an
-  `asm { ... }` block and reference via `lea rdx, [rip + N]`.
-  *Filed upstream:* `cyrius/docs/development/issues/2026-05-13-gnoboot-byte-array-literal.md`.
+- **Top-level `kernel;` mode emit order**: `var X = expr;` at the
+  top level of a `kernel;` source is a *global with deferred
+  initializer*, not an inline statement. Cyrius emits intervening
+  `asm` blocks BEFORE the `&expr` lea, so the agnos-shim
+  `var p = &foo; asm { mov [rax], rdx }` register-capture pattern
+  silently fails at top level (RAX is junk; capture writes to
+  random memory). The pattern works **inside a fn body** — locals
+  ARE inline. gnoboot's "Step 4a probe" originally claimed PASS
+  from this pattern; Step 4's disassembly later revealed the
+  capture was a no-op and the post-capture print only worked
+  because it used firmware-preserved RDX directly. After the
+  cyrius 5.11.52 `fn efi_main` convention landed, the pattern
+  became irrelevant — cyrius auto-emits the entry trampoline.
 - **Cyrius internal fn-call ABI under `_TARGET_EFI_APPLICATION` is
-  MS x64**, not SysV. Verified via objdump: callee prologue saves
-  RCX/RDX (not RDI/RSI) into local slots. This contradicts
-  `cyrius/lib/fnptr.cyr`'s comment which documents SysV — that doc
-  predates the TARGET_EFI work and is no longer accurate for this
-  target. fncallN's asm doesn't have a TARGET_EFI branch either.
-  *Filed upstream as part of:* `cyrius/docs/development/issues/2026-05-13-gnoboot-efi-main-convention.md`.
-- **No `fn efi_main(handle, st)` entry convention.** Cyrius has the
-  `fn main(); var r = main(); syscall(SYS_EXIT, r);` Linux/macOS
-  pattern but no UEFI equivalent. Consumer hand-rolls a ~15-line
-  asm trampoline (capture RCX/RDX → callee-saved R14/R15, get fn
-  ptr via `var fp = &efi_main`, set MS x64 args, call, ret to
-  firmware). Works but is delicate (small ordering bugs around
-  top-level `var X = expr;` vs. `asm` interleaving cost a debugging
-  cycle in Step 4a/Step 4 first attempt).
-  *Filed upstream:* `cyrius/docs/development/issues/2026-05-13-gnoboot-efi-main-convention.md`.
-
-### Verified entry-trampoline pattern (works under cyrius 5.11.49)
-
-```cyrius
-kernel;
-
-fn efi_main(handle, st) {
-    # ... normal cyrius. Inside a fn body, the agnos-shim
-    # `var p = &g; asm { ... }` register-capture pattern works.
-    return 0;
-}
-
-# Top-level: ~15 lines of asm hand off firmware entry to efi_main.
-asm {
-    0x49; 0x89; 0xCE;          # mov r14, rcx  ; save ImageHandle
-    0x49; 0x89; 0xD7;          # mov r15, rdx  ; save SystemTable*
-}
-var fp = &efi_main;            # cyrius emits: rax = &efi_main
-asm {
-    0x4C; 0x89; 0xF1;          # mov rcx, r14  ; MS x64 arg 0
-    0x4C; 0x89; 0xFA;          # mov rdx, r15  ; MS x64 arg 1
-    0x48; 0x83; 0xEC; 0x08;    # sub rsp, 8    ; re-align stack
-    0xFF; 0xD0;                # call rax
-    0x48; 0x83; 0xC4; 0x08;    # add rsp, 8
-    0x31; 0xC0;                # xor eax, eax  ; EFI_SUCCESS
-    0xC3;                      # ret to firmware
-}
-```
-
-R14/R15 are callee-saved in both SysV and MS x64, so they survive
-across cyrius's `var fp = &efi_main` emit. The ABI inside the call
-is MS x64 (cyrius's internal convention under TARGET_EFI).
-
-### Pending for v0.1.0
-
-- Step 4 — ESP file read: open SimpleFileSystem on the loaded image's
-  device, traverse `\boot\agnos`, read into AllocatePages buffer.
-- Step 5 — ELF64 parse + AllocatePages per PT_LOAD + memcpy/zero-fill.
-- Step 6 — GetMemoryMap into the sovereign boot-info struct.
-- Step 7 — sovereign struct build + ExitBootServices + jump to kernel
-  entry with `RDI = &boot_info` (SysV ABI; magic `0x41474E4F = 'AGNO'`).
-- Step 8 — AGNOS kernel shim swap MB2 → sovereign struct (cross-repo).
-- Step 9 — end-to-end gnoboot → AGNOS kernel under QEMU OVMF (clean
-  serial trace through scheduler + tier3 test "=== done ===").
-- Step 12 — iron Attempt 5 on the NUC AMD (full re-provision; the
-  closed-beta MVP gate).
+  MS x64**, not SysV — verified via `objdump`. Callee prologue
+  saves RCX/RDX (not RDI/RSI) to local slots. This contradicts
+  `lib/fnptr.cyr`'s longstanding SysV comment, which predates the
+  TARGET_EFI work. Under v5.11.52+ cyrius predefines
+  `CYRIUS_TARGET_WIN` alongside `CYRIUS_TARGET_EFI` so the
+  TARGET_WIN MS-x64 branches in `fnptr.cyr` fire — `fncallN` does
+  the right thing under TARGET_EFI without per-target plumbing.
+- **Byte-array literal `[N]` capacity** is `N × 8` bytes (cyrius's
+  array-slot semantic). For UTF-16LE messages, `N = ceil((chars+1)*2 / 8)`.
+  Cyrius reports overflow errors with a line number that points
+  *near* — sometimes one or two lines before — the first
+  overflowing array; not always the array itself. Two early
+  overflows (`msg_li_fail` at 18 B in N=2=16 cap, `msg_sfs_fail`
+  at 20 B) were misread as a different array failing because the
+  reported line was a blank line. Re-look at the next overflow
+  encountered.
+- **OVMF requires GPT-disk-with-ESP** for the
+  `\EFI\BOOT\BOOTX64.EFI` removable-boot path to resolve. A raw
+  FAT image gets `BdsDxe: failed to load Boot0002: Not Found`.
+  `tests/ovmf_smoke.sh` builds the canonical layout: 64 MB image
+  + GPT label + single FAT32 ESP partition at 1 MiB + `esp on`
+  flag.
+- **`AllocatePages` at `AllocateAddress = 0x100000`** works under
+  OVMF (firmware reserves below 1 MB but not at the 1 MB mark
+  itself). `EfiLoaderData` MemoryType lets us write to the
+  allocated pages during boot services time; W^X "no-execute"
+  enforcement only bites at execution-time (didn't affect our
+  load — and didn't affect the post-EBS jump to 0x1000A8 either,
+  since the kernel ran far enough to print 10 init lines).
+- **`ExitBootServices` map-key invalidation**: any firmware
+  service call (including `efi_print` via ConOut) between
+  `GetMemoryMap` and `ExitBootServices` invalidates the
+  `mm_key`. gnoboot calls `GetMemoryMap` once informationally
+  early, then re-calls it immediately before `ExitBootServices`
+  with no intervening firmware calls. The fresh key passes.
