@@ -71,14 +71,31 @@ var sfs_guid[2] = {
     0x8E,0x39,0x00,0xA0,0xC9,0x69,0x72,0x3B
 };
 
+# EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID = 9042a9de-23dc-4a38-96fb-7aded080516a.
+# Captured pre-EBS so the kernel can paint a boot-time canary at entry
+# instruction #1 (Attempt 7 bisection — boot_info-inlined fb fields let
+# raw asm in agnos boot_shim read fb_phys from [rdi+0x48] without
+# walking a tag stream). See iron-boot-testing-log § Attempt 6.
+var gop_guid[2] = {
+    0xDE,0xA9,0x42,0x90, 0xDC,0x23, 0x38,0x4A,
+    0x96,0xFB,0x7A,0xDE,0xD0,0x80,0x51,0x6A
+};
+
 # === Sovereign boot-info struct ==========================================
 # Layout per agnosticos/docs/development/path-c-sovereign-uefi.md § Handoff.
-# 80 bytes total (72 inlined fields + 8-byte END tag).
+# 112 bytes total (104 inlined fields + 8-byte END tag).
+#
+# Layout version 2 (v0.1.0+ canary build) — bumped from v1 to inline the
+# framebuffer fields at 0x48-0x60. Originally framebuffer was a type=1
+# tag in the tag stream; but the agnos kernel canary needs to read
+# fb_phys from raw asm at entry instruction #1 (before stack setup,
+# before any cyrius fn call), and walking a tag stream in raw asm is
+# brutal. Inlining at known offsets makes the canary 26 bytes total.
 #
 #   0x00  u32   magic            = 0x41474E4F ('AGNO')
-#   0x04  u32   version          = 1
-#   0x08  u32   struct_size      = 80
-#   0x0C  u32   flags            = 0
+#   0x04  u32   version          = 2 (bumped: inlined fb fields)
+#   0x08  u32   struct_size      = 112 (0x70)
+#   0x0C  u32   flags            (bit 0=serial, bit 1=fb_present)
 #   0x10  u64   initramfs_phys   (filled at runtime or 0 for MVP)
 #   0x18  u64   initramfs_size
 #   0x20  u64   cmdline_phys
@@ -87,16 +104,23 @@ var sfs_guid[2] = {
 #   0x34  u32   memmap_entsize   (filled at runtime: mm_dsz)
 #   0x38  u64   acpi_rsdp_phys   (0 for MVP; kernel doesn't read yet)
 #   0x40  u64   efi_st_phys      (filled at runtime: SystemTable*)
-#   0x48  tag[] type=0 END terminator (size=0 ok; walker stops at type==0)
-var boot_info[10] = {
+#   0x48  u64   fb_phys          (filled if GOP located; 0 = no fb)
+#   0x50  u32   fb_pitch         (bytes per scanline = ppl * 4)
+#   0x54  u32   fb_width         (HorizontalResolution)
+#   0x58  u32   fb_height        (VerticalResolution)
+#   0x5C  u32   fb_pixel_format  (0=RGB, 1=BGR, 2=Bitmask, 3=BltOnly)
+#   0x60  u64   reserved         (alignment + future fields)
+#   0x68  tag[] type=0 END terminator (size=0 ok; walker stops at type==0)
+var boot_info[14] = {
     # 0x00: magic = 0x41474E4F LE
     0x4F, 0x4E, 0x47, 0x41,
-    # 0x04: version = 1
-    0x01, 0x00, 0x00, 0x00,
-    # 0x08: struct_size = 80 (0x50)
-    0x50, 0x00, 0x00, 0x00,
-    # 0x0C: flags = 0 (everything else zero via trailing-zero fill; END
-    #       tag at 0x48 is type=0 because trailing zeros put 0 there too)
+    # 0x04: version = 2
+    0x02, 0x00, 0x00, 0x00,
+    # 0x08: struct_size = 112 (0x70)
+    0x70, 0x00, 0x00, 0x00,
+    # 0x0C: flags = 0 (fb_present bit set at runtime if GOP captured;
+    #       everything else zero via trailing-zero fill; END tag at 0x68
+    #       is type=0 because trailing zeros put 0 there too)
     0x00, 0x00, 0x00, 0x00
 };
 
@@ -106,6 +130,7 @@ var li_out[1];
 var sfs_out[1];
 var root_out[1];
 var file_out[1];
+var gop_out[1];
 var read_sz[1];
 var alloc_addr[1];
 var elf_hdr[8];
@@ -129,11 +154,12 @@ fn efi_print(st, msg): i64 {
 # === Entry ============================================================
 
 fn efi_main(handle, st): i64 {
-    var bs       = load64(st + 0x60);
-    var fn_hp    = load64(bs + 0x98);
-    var fn_alloc = load64(bs + 0x28);
-    var fn_mmap  = load64(bs + 0x38);
-    var fn_ebs   = load64(bs + 0xE8);
+    var bs        = load64(st + 0x60);
+    var fn_hp     = load64(bs + 0x98);
+    var fn_alloc  = load64(bs + 0x28);
+    var fn_mmap   = load64(bs + 0x38);
+    var fn_locate = load64(bs + 0x140);
+    var fn_ebs    = load64(bs + 0xE8);
 
     # --- 1-2: HandleProtocol(LI) + HandleProtocol(SFS) ---
     var rc = fncall3(fn_hp, handle, &li_guid, &li_out);
@@ -218,6 +244,40 @@ fn efi_main(handle, st): i64 {
     while (bss_i < bss_e) {
         store8(bss_i, 0);
         bss_i = bss_i + 1;
+    }
+
+    # --- 10c: Locate GOP and capture framebuffer mode into boot_info ---
+    # MUST run pre-EBS (LocateProtocol is a Boot Service). MUST run
+    # before the Step-12 GetMemoryMap-immediately-before-EBS pattern,
+    # because any firmware call after GetMemoryMap invalidates the map
+    # key. Slotted between BSS zero and Step 11.
+    #
+    # Failure mode is benign: if GOP isn't present (text-mode firmware,
+    # headless serial-only board) LocateProtocol returns non-zero and
+    # we leave fb_phys = 0 in boot_info. The agnos canary checks
+    # fb_phys for null and skips the paint if absent — kernel still
+    # boots, just no visual signal.
+    #
+    # Fields copied (not pointers) because EFI_GRAPHICS_OUTPUT_PROTOCOL
+    # function pointers go dead post-EBS, but the framebuffer physical
+    # base + geometry stay valid; we want stable values in boot_info
+    # for the kernel's lifetime.
+    rc = fncall3(fn_locate, &gop_guid, 0, &gop_out);
+    if (rc == 0) {
+        var gop_p    = load64(&gop_out);
+        var gop_mode = load64(gop_p + 0x18);
+        var mode_inf = load64(gop_mode + 0x08);
+        var fb_phys  = load64(gop_mode + 0x18);
+        var fb_w     = load32(mode_inf + 0x04);
+        var fb_h     = load32(mode_inf + 0x08);
+        var pf       = load32(mode_inf + 0x0C);
+        var ppl      = load32(mode_inf + 0x20);
+        store64(&boot_info + 0x48, fb_phys);
+        store32(&boot_info + 0x50, ppl * 4);   # fb_pitch (assume 32 bpp)
+        store32(&boot_info + 0x54, fb_w);
+        store32(&boot_info + 0x58, fb_h);
+        store32(&boot_info + 0x5C, pf);
+        store32(&boot_info + 0x0C, 0x02);      # flags.fb_present = 1
     }
 
     # --- 11: Initial GetMemoryMap (informational; just to size the buffer) ---
