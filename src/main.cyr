@@ -155,10 +155,15 @@ fn efi_print(st, msg): i64 {
 
 fn efi_main(handle, st): i64 {
     # === CMOS gnoboot checkpoint 1 (efi_main entered) + magic 0xCD ===
-    # Pairs with agnos kernel's CMOS scheme (boot_shim writes CMOS[0x40]
-    # = checkpoint, CMOS[0x41] = 0xAB magic). Gnoboot uses CMOS[0x42] /
-    # CMOS[0x43] so the two scopes don't overwrite each other. Decoded
+    # Pairs with agnos kernel's CMOS scheme (boot_shim writes CMOS[0x50]
+    # = checkpoint, CMOS[0x51] = 0xAB magic). Gnoboot uses CMOS[0x52] /
+    # CMOS[0x53] so the two scopes don't overwrite each other. Decoded
     # by agnosticos/scripts/read-boot-log.sh.
+    #
+    # Slot map shifted +0x10 on 2026-05-14: archaemenid BIOS was
+    # observed writing CMOS[0x42]/[0x43]/[0x44] on every cold boot,
+    # which clobbered the magic before Linux could read it. The
+    # 0x50-0x7F range is virgin on that hardware.
     #
     # Iron has no serial wiring (single-machine dev setup); CMOS is
     # battery-backed and survives the reset that follows a fault, so
@@ -166,8 +171,8 @@ fn efi_main(handle, st): i64 {
     # when nothing reaches the framebuffer. Per-write is 8 bytes,
     # clobbers AL only.
     asm {
-        0xB0; 0x43; 0xE6; 0x70; 0xB0; 0xCD; 0xE6; 0x71;    # CMOS[0x43] = 0xCD (magic)
-        0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x01; 0xE6; 0x71;    # CMOS[0x42] = 1   (efi_main entered)
+        0xB0; 0x53; 0xE6; 0x70; 0xB0; 0xCD; 0xE6; 0x71;    # CMOS[0x53] = 0xCD (magic)
+        0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x01; 0xE6; 0x71;    # CMOS[0x52] = 1   (efi_main entered)
     }
 
     var bs        = load64(st + 0x60);
@@ -189,7 +194,7 @@ fn efi_main(handle, st): i64 {
     var fn_openvol = load64(sfs + 0x08);
 
     # === CMOS gnoboot checkpoint 2 (ESP located: HP(LI)+HP(SFS) ok) ===
-    asm { 0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x02; 0xE6; 0x71; }
+    asm { 0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x02; 0xE6; 0x71; }
 
     # --- 3-4: OpenVolume + Open file ---
     rc = fncall2(fn_openvol, sfs, &root_out);
@@ -249,7 +254,7 @@ fn efi_main(handle, st): i64 {
     if (load8(p_paddr + 3) != 0x46) { efi_print(st, &msg_vfy_f); return 0; }
 
     # === CMOS gnoboot checkpoint 3 (kernel ELF mapped + magic verified) ===
-    asm { 0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x03; 0xE6; 0x71; }
+    asm { 0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x03; 0xE6; 0x71; }
 
     # --- 10b: Zero BSS gap [p_filesz, p_memsz). ELF semantics require
     # [end-of-file-image, end-of-memory-image) to be zero; UEFI
@@ -330,9 +335,9 @@ fn efi_main(handle, st): i64 {
     store32(&boot_info + 0x34, dsz);                   # memmap_entsize
 
     # === CMOS gnoboot checkpoint 4 (memmap fresh, pre-EBS) ===
-    # If readback shows CMOS[0x42]=4 + CMOS[0x41]!=0xAB, ExitBootServices
+    # If readback shows CMOS[0x52]=4 + CMOS[0x51]!=0xAB, ExitBootServices
     # itself failed (or faulted) — invalid mm_key is the most common cause.
-    asm { 0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x04; 0xE6; 0x71; }
+    asm { 0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x04; 0xE6; 0x71; }
 
     # --- 13: ExitBootServices — POINT OF NO RETURN ---
     var key = load64(&mm_key);
@@ -352,14 +357,14 @@ fn efi_main(handle, st): i64 {
     asm {
         # === CMOS gnoboot checkpoint 5 (post-EBS, immediately pre-jmp) ===
         # MUST clobber AL only; mov/out preserves RAX-the-pointer because
-        # the `mov al, 0x42` only writes the low byte of RAX. The CMOS
+        # the `mov al, 0x52` only writes the low byte of RAX. The CMOS
         # writes happen AFTER ExitBootServices, so no firmware service
         # is invoked — pure port I/O is safe. If readback shows
-        # CMOS[0x42]=5 + CMOS[0x41]!=0xAB, the jmp executed but the
+        # CMOS[0x52]=5 + CMOS[0x51]!=0xAB, the jmp executed but the
         # kernel's first instruction (CMOS magic write) faulted.
         # 8+8 = 16 bytes; clobbers AL only.
         0x50;                                  # push rax (save &boot_info)
-        0xB0; 0x42; 0xE6; 0x70; 0xB0; 0x05; 0xE6; 0x71;    # CMOS[0x42] = 5
+        0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x05; 0xE6; 0x71;    # CMOS[0x52] = 5
         0x58;                                  # pop rax  (restore &boot_info)
         # mov rdi, rax     ; rdi = &boot_info (sovereign-struct ptr)
         0x48; 0x89; 0xC7;
