@@ -180,9 +180,15 @@ fn efi_main(handle, st): i64 {
     var p_memsz  = load64(&phdr + 40);
 
     # --- 8-10: AllocatePages + load segment ---
+    # MemoryType arg = 1 (EfiLoaderCode), NOT 2 (EfiLoaderData). Modern
+    # AMD UEFI firmware may NX-mark LoaderData pages under strict W^X
+    # — jumping to 0x1000A8 in a LoaderData page triple-faults silently
+    # on iron while OVMF (lenient W^X for data execution) lets it run.
+    # LoaderCode signals "this is executable" and firmware leaves NX
+    # clear in the live page tables we inherit post-EBS.
     var pages = (p_memsz + 0xFFF) / 0x1000;
     store64(&alloc_addr, p_paddr);
-    rc = fncall4(fn_alloc, 2, 2, pages, &alloc_addr);
+    rc = fncall4(fn_alloc, 2, 1, pages, &alloc_addr);
     if (rc != 0) { efi_print(st, &msg_ap_f); return 0; }
 
     rc = fncall2(fn_setpos, file, p_offset);
@@ -196,6 +202,23 @@ fn efi_main(handle, st): i64 {
     if (load8(p_paddr + 1) != 0x45) { efi_print(st, &msg_vfy_f); return 0; }
     if (load8(p_paddr + 2) != 0x4C) { efi_print(st, &msg_vfy_f); return 0; }
     if (load8(p_paddr + 3) != 0x46) { efi_print(st, &msg_vfy_f); return 0; }
+
+    # --- 10b: Zero BSS gap [p_filesz, p_memsz). ELF semantics require
+    # [end-of-file-image, end-of-memory-image) to be zero; UEFI
+    # AllocatePages does NOT guarantee zeroed memory (UEFI 2.x § 7.2:
+    # "the memory returned ... is undefined"). QEMU OVMF tends to return
+    # zero on fresh allocations — that masked the bug through Step 7
+    # QEMU PASS — but real firmware leaves POST/EFI scratch in those
+    # pages, so kernel globals in .bss read garbage and triple-fault
+    # at first reference. Byte-loop over the gap is microseconds at
+    # ~64 KB and avoids needing stdlib memset (gnoboot keeps zero
+    # stdlib deps; see cyrius.cyml).
+    var bss_i = p_paddr + p_filesz;
+    var bss_e = p_paddr + p_memsz;
+    while (bss_i < bss_e) {
+        store8(bss_i, 0);
+        bss_i = bss_i + 1;
+    }
 
     # --- 11: Initial GetMemoryMap (informational; just to size the buffer) ---
     store64(&mm_size, 16384);

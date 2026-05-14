@@ -6,6 +6,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Iron-only triple-fault post-EBS** (gnoboot's first iron run —
+  Attempt 5 / NUC AMD, 2026-05-13). Display showed "gnoboot 0.1 step 7:
+  Jumping to kernel..." (cosmetically on the same line as the firmware
+  splash because the splash didn't `\r\n`-terminate), then blank screen
+  + reset. QEMU OVMF still booted the kernel through 17 init checkpoints
+  to `Activating scheduler...` — divergence isolated to two gnoboot
+  assumptions that held under OVMF but not under AMD Zen UEFI:
+  1. **BSS gap not zeroed.** `main.cyr` read only `p_filesz` bytes
+     into `p_paddr` and never zeroed `[p_filesz, p_memsz)` (64 KB for
+     agnos 1.30.0). UEFI 2.x § 7.2 states `AllocatePages` returns
+     undefined memory contents; QEMU OVMF happened to return zeroes,
+     real firmware leaves POST/EFI scratch. Kernel `.bss` globals read
+     garbage on iron, triple-fault at first reference. Fix: byte-loop
+     `store8(addr, 0)` over the gap right after the segment read and
+     ELF-magic verify. No new stdlib dep (gnoboot stays `[deps] stdlib = []`).
+  2. **MemoryType 2 (EfiLoaderData) → 1 (EfiLoaderCode).** Strict-W^X
+     firmware NX-marks LoaderData pages — jump to 0x1000A8 in a
+     LoaderData page faults silently on iron; OVMF executes from
+     LoaderData regardless. EfiLoaderCode tells firmware "this is
+     executable" so NX stays clear in the inherited post-EBS page
+     tables. One-byte change at the `bs->AllocatePages` call.
+
+  Both fixes bundle into one iron retest. `tests/ovmf_smoke.sh` still
+  PASS on QEMU OVMF (kernel reaches `Activating scheduler...`).
+  Diagnosis logged in `agnosticos/docs/development/iron-boot-testing-log.md`
+  § *Attempt 5 — 2026-05-13*.
+
 
 ## [0.1.0] — 2026-05-13
 
