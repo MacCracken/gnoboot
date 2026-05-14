@@ -80,8 +80,15 @@ fi
 cp "$OVMF_VARS_SRC" vars.fd
 chmod +w vars.fd
 
-OUTPUT=$(timeout 12 qemu-system-x86_64 \
-    -machine q35 -m 256M \
+# -cpu max advertises RDRAND + SMEP + SMAP. The default qemu64 CPU
+# lacks RDRAND; the AGNOS kernel uses it in kaslr_seed() during
+# pmm_init() and faults (silently — IDT is installed but the #UD
+# default handler doesn't propagate). On real iron (NUC AMD / Zen)
+# RDRAND is supported natively, so this flag is QEMU-emulation-only.
+# QEMU_TIMEOUT defaults to 20s (was 12s) — the kernel boot reaches
+# the scheduler/userland tests within ~15s; raise for slower CI.
+OUTPUT=$(timeout "${QEMU_TIMEOUT:-20}" qemu-system-x86_64 \
+    -machine q35 -m 256M -cpu max \
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
     -drive "if=pflash,format=raw,file=vars.fd" \
     -drive "file=disk.img,format=raw" \
