@@ -6,6 +6,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **UEFI-output cleanup** (2026-05-15). Collapsed the 13 per-stage
+  failure strings (`msg_li_f`, `msg_sfs_f`, … `msg_ebs_f`) into a
+  single shared template `msg_fail = "gnoboot: fail @ XXXX\r\n"`
+  plus a 13-entry `code_*` table. New `efi_fail(st, code)` helper
+  patches the 4-char placeholder via one `store64` and prints — call
+  sites went from `efi_print(st, &msg_XX_f); return 0;` to
+  `efi_fail(st, &code_XX); return 0;`. ABI unchanged; binary stays
+  within structural-gate envelope.
+
+- **Banner tightened to `gnoboot v<VERSION>: handing off to kernel`**
+  (2026-05-15). Drops the stale "step 7" framing carried over from
+  the path-c bring-up. `tests/ovmf_smoke.sh` default `EXPECT` updated
+  to match the new banner — the prior default
+  (`gnoboot v0.1.0`) had silently diverged from the actual ConOut
+  text and was failing on every run regardless of handoff correctness.
+  Version string in `msg_pre` is hand-synced with `VERSION` at each
+  release tag; release checklist updated to call this out.
+
+- **Banner now lands on a cleared screen** (2026-05-15). Added
+  `efi_clear(st)` helper (calls `ConOut->ClearScreen` via fncall1)
+  invoked immediately before `efi_print(&msg_pre)`. Wipes the
+  firmware splash + OVMF preamble so gnoboot's handoff line is the
+  only thing on the framebuffer when control passes to the kernel.
+
+### Removed
+
+- **CMOS canary checkpoints** (2026-05-15). Stripped the five inline
+  CMOS-port-I/O blocks at `efi_main` entry, post-`HandleProtocol`,
+  post-ELF-load, pre-EBS, and post-EBS-immediately-pre-jmp. Each
+  block wrote `CMOS[0x52] = <stage>` (and the entry block also wrote
+  `CMOS[0x53] = 0xCD` as a presence magic) so a downstream Linux
+  could `read-boot-log.sh` from battery-backed RTC RAM after a
+  faulted reset. Diagnostic channel only — never load-bearing on the
+  handoff. Boot-info struct ABI, magic (`0x41474E4F`), and
+  RDI-convention all unchanged. GOP framebuffer capture is retained
+  (v2 boot-info layout still inlines `fb_phys` / `fb_pitch` /
+  `fb_width` / `fb_height` / `fb_pixel_format` at offsets 0x48-0x5C).
+
 ### Added
 
 - **GOP framebuffer capture for Attempt 7 boot-canary** (2026-05-13).

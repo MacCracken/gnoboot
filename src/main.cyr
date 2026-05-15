@@ -21,35 +21,52 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot 0.1 step 7: jumping to kernel...\r\n\0" — 43 CHAR16 = 86 bytes; N=11 → 88
-var msg_pre[11] = {
+# "gnoboot v0.1.0: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
+# release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
+# default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
+var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
-    0x30,0x00, 0x2E,0x00, 0x31,0x00, 0x20,0x00,    # '0.1 '
-    0x73,0x00, 0x74,0x00, 0x65,0x00, 0x70,0x00,    # step
-    0x20,0x00, 0x37,0x00, 0x3A,0x00, 0x20,0x00,    # ' 7: '
-    0x6A,0x00, 0x75,0x00, 0x6D,0x00, 0x70,0x00,    # jump
+    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x31,0x00,    # 'v0.1'
+    0x2E,0x00, 0x30,0x00, 0x3A,0x00, 0x20,0x00,    # '.0: '
+    0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
+    0x6F,0x00, 0x66,0x00, 0x66,0x00, 0x20,0x00,    # 'off '
     0x74,0x00, 0x6F,0x00, 0x20,0x00, 0x6B,0x00,    # 'to k'
     0x65,0x00, 0x72,0x00, 0x6E,0x00, 0x65,0x00,    # erne
-    0x6C,0x00, 0x2E,0x00, 0x2E,0x00, 0x2E,0x00,    # l...
-    0x0D,0x00, 0x0A,0x00                             # \r\n
+    0x6C,0x00, 0x0D,0x00, 0x0A,0x00, 0x00,0x00     # 'l\r\n' + null pad
 };
 
-# Failure messages keyed to which firmware-call stage broke.
-var msg_li_f[3]  = { 0x4C,0x00, 0x49,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_sfs_f[3] = { 0x53,0x00, 0x46,0x00, 0x53,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_vol_f[3] = { 0x56,0x00, 0x4F,0x00, 0x4C,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_opn_f[3] = { 0x4F,0x00, 0x50,0x00, 0x4E,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_rd_f[3]  = { 0x52,0x00, 0x44,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_elf_f[3] = { 0x6E,0x00, 0x6F,0x00, 0x20,0x00, 0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_sp_f[3]  = { 0x53,0x00, 0x50,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_pt_f[3]  = { 0x50,0x00, 0x54,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_ap_f[3]  = { 0x41,0x00, 0x50,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_ld_f[3]  = { 0x4C,0x00, 0x44,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_vfy_f[3] = { 0x56,0x00, 0x46,0x00, 0x59,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_mm_f[3]  = { 0x4D,0x00, 0x4D,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };
-var msg_ebs_f[3] = { 0x45,0x00, 0x42,0x00, 0x53,0x00, 0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00, 0x6C,0x00, 0x0D,0x00, 0x0A,0x00 };  # "EBS fail\r\n"
+# Failure template: "gnoboot: fail @ XXXX\r\n\0\0" — 24 CHAR16 = 48 bytes; N=6.
+# The 4-char placeholder at byte offset 32 (slot 4) is patched in place
+# by efi_fail() before each print, so all 13 failure sites share one
+# buffer and one print path instead of 13 standalone UTF-16LE strings.
+var msg_fail[6] = {
+    0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
+    0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x3A,0x00,    # 'oot:'
+    0x20,0x00, 0x66,0x00, 0x61,0x00, 0x69,0x00,    # ' fai'
+    0x6C,0x00, 0x20,0x00, 0x40,0x00, 0x20,0x00,    # 'l @ '
+    0x20,0x00, 0x20,0x00, 0x20,0x00, 0x20,0x00,    # 'XXXX' (patched per call)
+    0x0D,0x00, 0x0A,0x00, 0x00,0x00, 0x00,0x00     # \r\n + null pad
+};
+
+# Per-stage 4-char UTF-16LE codes (8 bytes = one u64). Copied into
+# msg_fail's placeholder by efi_fail() via a single 64-bit store. Codes
+# are space-padded right so the printed line is always 4 chars wide.
+var code_li [1] = { 0x4C,0x00, 0x49,0x00, 0x20,0x00, 0x20,0x00 };    # "LI  "  HandleProtocol(LoadedImage)
+var code_sfs[1] = { 0x53,0x00, 0x46,0x00, 0x53,0x00, 0x20,0x00 };    # "SFS "  HandleProtocol(SimpleFileSystem)
+var code_vol[1] = { 0x56,0x00, 0x4F,0x00, 0x4C,0x00, 0x20,0x00 };    # "VOL "  OpenVolume
+var code_opn[1] = { 0x4F,0x00, 0x50,0x00, 0x4E,0x00, 0x20,0x00 };    # "OPN "  Open(\boot\agnos)
+var code_rd [1] = { 0x52,0x00, 0x44,0x00, 0x20,0x00, 0x20,0x00 };    # "RD  "  file Read
+var code_elf[1] = { 0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x20,0x00 };    # "ELF "  ELF magic mismatch
+var code_sp [1] = { 0x53,0x00, 0x50,0x00, 0x20,0x00, 0x20,0x00 };    # "SP  "  SetPosition
+var code_pt [1] = { 0x50,0x00, 0x54,0x00, 0x20,0x00, 0x20,0x00 };    # "PT  "  program-header type != PT_LOAD
+var code_ap [1] = { 0x41,0x00, 0x50,0x00, 0x20,0x00, 0x20,0x00 };    # "AP  "  AllocatePages
+var code_ld [1] = { 0x4C,0x00, 0x44,0x00, 0x20,0x00, 0x20,0x00 };    # "LD  "  segment Read
+var code_vfy[1] = { 0x56,0x00, 0x46,0x00, 0x59,0x00, 0x20,0x00 };    # "VFY "  post-load ELF magic re-check
+var code_mm [1] = { 0x4D,0x00, 0x4D,0x00, 0x20,0x00, 0x20,0x00 };    # "MM  "  GetMemoryMap
+var code_ebs[1] = { 0x45,0x00, 0x42,0x00, 0x53,0x00, 0x20,0x00 };    # "EBS "  ExitBootServices
 
 # Path: UTF-16LE "\boot\agnos\0" — 12 CHAR16 = 24 bytes; N=3 → 24
 var path[3] = {
@@ -150,31 +167,30 @@ fn efi_print(st, msg): i64 {
     return fncall2(out_str, con_out, msg);
 }
 
+# Call EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL.ClearScreen on ConOut. Wipes the
+# firmware splash + any prior text-mode output and homes the cursor to
+# (0, 0). Used right before msg_pre so gnoboot's handoff line appears
+# on a clean screen instead of after the OVMF / firmware preamble.
+# ClearScreen lives at offset 0x30 in the SimpleTextOutput protocol.
+fn efi_clear(st): i64 {
+    var con_out  = load64(st + 0x40);
+    var fn_clear = load64(con_out + 0x30);
+    return fncall1(fn_clear, con_out);
+}
+
+# Patch msg_fail's 4-char placeholder (bytes 32..40) with the code at
+# `code` and print. Returns 0 so callers can chain into `return 0;`
+# cleanly after the call.
+fn efi_fail(st, code): i64 {
+    store64(&msg_fail + 32, load64(code));
+    efi_print(st, &msg_fail);
+    return 0;
+}
+
 
 # === Entry ============================================================
 
 fn efi_main(handle, st): i64 {
-    # === CMOS gnoboot checkpoint 1 (efi_main entered) + magic 0xCD ===
-    # Pairs with agnos kernel's CMOS scheme (boot_shim writes CMOS[0x50]
-    # = checkpoint, CMOS[0x51] = 0xAB magic). Gnoboot uses CMOS[0x52] /
-    # CMOS[0x53] so the two scopes don't overwrite each other. Decoded
-    # by agnosticos/scripts/read-boot-log.sh.
-    #
-    # Slot map shifted +0x10 on 2026-05-14: archaemenid BIOS was
-    # observed writing CMOS[0x42]/[0x43]/[0x44] on every cold boot,
-    # which clobbered the magic before Linux could read it. The
-    # 0x50-0x7F range is virgin on that hardware.
-    #
-    # Iron has no serial wiring (single-machine dev setup); CMOS is
-    # battery-backed and survives the reset that follows a fault, so
-    # this is the only post-mortem channel for "where did the boot die"
-    # when nothing reaches the framebuffer. Per-write is 8 bytes,
-    # clobbers AL only.
-    asm {
-        0xB0; 0x53; 0xE6; 0x70; 0xB0; 0xCD; 0xE6; 0x71;    # CMOS[0x53] = 0xCD (magic)
-        0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x01; 0xE6; 0x71;    # CMOS[0x52] = 1   (efi_main entered)
-    }
-
     var bs        = load64(st + 0x60);
     var fn_hp     = load64(bs + 0x98);
     var fn_alloc  = load64(bs + 0x28);
@@ -184,26 +200,23 @@ fn efi_main(handle, st): i64 {
 
     # --- 1-2: HandleProtocol(LI) + HandleProtocol(SFS) ---
     var rc = fncall3(fn_hp, handle, &li_guid, &li_out);
-    if (rc != 0) { efi_print(st, &msg_li_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_li); return 0; }
     var li  = load64(&li_out);
     var dev = load64(li + 0x18);
 
     rc = fncall3(fn_hp, dev, &sfs_guid, &sfs_out);
-    if (rc != 0) { efi_print(st, &msg_sfs_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_sfs); return 0; }
     var sfs        = load64(&sfs_out);
     var fn_openvol = load64(sfs + 0x08);
 
-    # === CMOS gnoboot checkpoint 2 (ESP located: HP(LI)+HP(SFS) ok) ===
-    asm { 0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x02; 0xE6; 0x71; }
-
     # --- 3-4: OpenVolume + Open file ---
     rc = fncall2(fn_openvol, sfs, &root_out);
-    if (rc != 0) { efi_print(st, &msg_vol_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_vol); return 0; }
     var root    = load64(&root_out);
     var fn_open = load64(root + 0x08);
 
     rc = fncall5(fn_open, root, &file_out, &path, 1, 0);
-    if (rc != 0) { efi_print(st, &msg_opn_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_opn); return 0; }
     var file      = load64(&file_out);
     var fn_read   = load64(file + 0x20);
     var fn_setpos = load64(file + 0x38);
@@ -211,18 +224,18 @@ fn efi_main(handle, st): i64 {
     # --- 5-7: Parse ELF + first program header ---
     store64(&read_sz, 64);
     rc = fncall3(fn_read, file, &read_sz, &elf_hdr);
-    if (rc != 0) { efi_print(st, &msg_rd_f); return 0; }
-    if (load8(&elf_hdr + 0) != 0x7F) { efi_print(st, &msg_elf_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_rd); return 0; }
+    if (load8(&elf_hdr + 0) != 0x7F) { efi_fail(st, &code_elf); return 0; }
 
     var e_phoff = load64(&elf_hdr + 0x20);
 
     rc = fncall2(fn_setpos, file, e_phoff);
-    if (rc != 0) { efi_print(st, &msg_sp_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_sp); return 0; }
 
     store64(&read_sz, 56);
     rc = fncall3(fn_read, file, &read_sz, &phdr);
-    if (rc != 0) { efi_print(st, &msg_rd_f); return 0; }
-    if (load8(&phdr + 0) != 1) { efi_print(st, &msg_pt_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_rd); return 0; }
+    if (load8(&phdr + 0) != 1) { efi_fail(st, &code_pt); return 0; }
 
     var p_offset = load64(&phdr +  8);
     var p_paddr  = load64(&phdr + 24);
@@ -239,22 +252,19 @@ fn efi_main(handle, st): i64 {
     var pages = (p_memsz + 0xFFF) / 0x1000;
     store64(&alloc_addr, p_paddr);
     rc = fncall4(fn_alloc, 2, 1, pages, &alloc_addr);
-    if (rc != 0) { efi_print(st, &msg_ap_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_ap); return 0; }
 
     rc = fncall2(fn_setpos, file, p_offset);
-    if (rc != 0) { efi_print(st, &msg_sp_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_sp); return 0; }
 
     store64(&read_sz, p_filesz);
     rc = fncall3(fn_read, file, &read_sz, p_paddr);
-    if (rc != 0) { efi_print(st, &msg_ld_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_ld); return 0; }
 
-    if (load8(p_paddr + 0) != 0x7F) { efi_print(st, &msg_vfy_f); return 0; }
-    if (load8(p_paddr + 1) != 0x45) { efi_print(st, &msg_vfy_f); return 0; }
-    if (load8(p_paddr + 2) != 0x4C) { efi_print(st, &msg_vfy_f); return 0; }
-    if (load8(p_paddr + 3) != 0x46) { efi_print(st, &msg_vfy_f); return 0; }
-
-    # === CMOS gnoboot checkpoint 3 (kernel ELF mapped + magic verified) ===
-    asm { 0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x03; 0xE6; 0x71; }
+    if (load8(p_paddr + 0) != 0x7F) { efi_fail(st, &code_vfy); return 0; }
+    if (load8(p_paddr + 1) != 0x45) { efi_fail(st, &code_vfy); return 0; }
+    if (load8(p_paddr + 2) != 0x4C) { efi_fail(st, &code_vfy); return 0; }
+    if (load8(p_paddr + 3) != 0x46) { efi_fail(st, &code_vfy); return 0; }
 
     # --- 10b: Zero BSS gap [p_filesz, p_memsz). ELF semantics require
     # [end-of-file-image, end-of-memory-image) to be zero; UEFI
@@ -310,9 +320,12 @@ fn efi_main(handle, st): i64 {
     # --- 11: Initial GetMemoryMap (informational; just to size the buffer) ---
     store64(&mm_size, 16384);
     rc = fncall5(fn_mmap, &mm_size, &mm_buf, &mm_key, &mm_dsz, &mm_dver);
-    if (rc != 0) { efi_print(st, &msg_mm_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_mm); return 0; }
 
     # --- Announce we're about to hand off (last text from gnoboot) ---
+    # ClearScreen first so the banner lands on a fresh framebuffer
+    # instead of trailing firmware/OVMF preamble. Cursor homes to (0,0).
+    efi_clear(st);
     efi_print(st, &msg_pre);
 
     # --- Fill sovereign boot-info dynamic fields ---
@@ -327,17 +340,12 @@ fn efi_main(handle, st): i64 {
     #         be called between this point and the EBS call below. ---
     store64(&mm_size, 16384);
     rc = fncall5(fn_mmap, &mm_size, &mm_buf, &mm_key, &mm_dsz, &mm_dver);
-    if (rc != 0) { efi_print(st, &msg_mm_f); return 0; }
+    if (rc != 0) { efi_fail(st, &code_mm); return 0; }
 
     var sz  = load64(&mm_size);
     var dsz = load64(&mm_dsz);
     store32(&boot_info + 0x30, sz / dsz);              # memmap_count
     store32(&boot_info + 0x34, dsz);                   # memmap_entsize
-
-    # === CMOS gnoboot checkpoint 4 (memmap fresh, pre-EBS) ===
-    # If readback shows CMOS[0x52]=4 + CMOS[0x51]!=0xAB, ExitBootServices
-    # itself failed (or faulted) — invalid mm_key is the most common cause.
-    asm { 0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x04; 0xE6; 0x71; }
 
     # --- 13: ExitBootServices — POINT OF NO RETURN ---
     var key = load64(&mm_key);
@@ -346,7 +354,7 @@ fn efi_main(handle, st): i64 {
         # Map key invalidated between GetMemoryMap and here. We can still
         # try to print (firmware boot services likely partially alive) but
         # don't trust further calls.
-        efi_print(st, &msg_ebs_f);
+        efi_fail(st, &code_ebs);
         return 0;
     }
 
@@ -355,17 +363,6 @@ fn efi_main(handle, st): i64 {
     # leaves &boot_info in RAX for the asm below.
     var p = &boot_info;
     asm {
-        # === CMOS gnoboot checkpoint 5 (post-EBS, immediately pre-jmp) ===
-        # MUST clobber AL only; mov/out preserves RAX-the-pointer because
-        # the `mov al, 0x52` only writes the low byte of RAX. The CMOS
-        # writes happen AFTER ExitBootServices, so no firmware service
-        # is invoked — pure port I/O is safe. If readback shows
-        # CMOS[0x52]=5 + CMOS[0x51]!=0xAB, the jmp executed but the
-        # kernel's first instruction (CMOS magic write) faulted.
-        # 8+8 = 16 bytes; clobbers AL only.
-        0x50;                                  # push rax (save &boot_info)
-        0xB0; 0x52; 0xE6; 0x70; 0xB0; 0x05; 0xE6; 0x71;    # CMOS[0x52] = 5
-        0x58;                                  # pop rax  (restore &boot_info)
         # mov rdi, rax     ; rdi = &boot_info (sovereign-struct ptr)
         0x48; 0x89; 0xC7;
         # mov eax, 0x1000A8 (zero-extends to rax = 0x00000000_001000A8)

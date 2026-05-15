@@ -3,12 +3,17 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-05-13 (v0.1.0 ship)
+> **Last refresh**: 2026-05-15 (v0.2 cycle — canary/output cleanup)
 
 ## Version
 
 **0.1.0** — released 2026-05-13. First gnoboot release. AGNOS MVP
 handoff verified end-to-end on QEMU OVMF.
+
+**v0.2 cycle in progress** on branch `0.2`. No new ABI; canary code
+removed, pre-EBS output consolidated. See CHANGELOG.md [Unreleased]
+for the running summary; M1 in `roadmap.md` is the gate for cutting
+v0.2.0.
 
 ## Toolchain
 
@@ -22,17 +27,21 @@ handoff verified end-to-end on QEMU OVMF.
 
 ## Binary
 
-- **`build/BOOTX64.EFI`**: ~6 KB (PE32+ EFI Application, x86_64,
+- **`build/BOOTX64.EFI`**: ~33 KB (PE32+ EFI Application, x86_64,
   subsystem 0x000A, NX_COMPAT + DYNAMIC_BASE + HIGH_ENTROPY_VA,
-  `.reloc` populated)
+  `.reloc` populated). Bulk is the cyrius `fncallN` MS-x64-ABI
+  trampolines from `lib/fnptr.cyr`; gnoboot's own code is ~1.5 KB.
 - **Entry**: cyrius e9 jmp prologue at `.text+0`, jumps to auto-trampoline
   that captures `RCX → R14`, `RDX → R15`, then `call efi_main` (MS x64 ABI)
 
 ## Source
 
-- `src/main.cyr` — single file, ~200 lines. UTF-16LE message constants,
-  EFI GUIDs (LoadedImage + SimpleFileSystem), `fn efi_print(st, msg)`,
-  `fn efi_main(handle, st)`. Entry trampoline auto-emitted by cyrius.
+- `src/main.cyr` — single file, ~375 lines. UTF-16LE message constants
+  (one `msg_pre` banner + one shared `msg_fail` template + 13
+  per-stage `code_*` codes), EFI GUIDs (LoadedImage + SimpleFileSystem
+  + GraphicsOutput), helpers `efi_print` / `efi_clear` / `efi_fail`,
+  entry `fn efi_main(handle, st)`. Entry trampoline auto-emitted by
+  cyrius.
 
 ## Tests
 
