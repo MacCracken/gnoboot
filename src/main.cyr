@@ -92,7 +92,7 @@ var sfs_guid[2] = {
 # Captured pre-EBS so the kernel can paint a boot-time canary at entry
 # instruction #1 (Attempt 7 bisection — boot_info-inlined fb fields let
 # raw asm in agnos boot_shim read fb_phys from [rdi+0x48] without
-# walking a tag stream). See iron-boot-testing-log § Attempt 6.
+# walking a tag stream). See iron-nuc-zen-log § Attempt 6.
 var gop_guid[2] = {
     0xDE,0xA9,0x42,0x90, 0xDC,0x23, 0x38,0x4A,
     0x96,0xFB,0x7A,0xDE,0xD0,0x80,0x51,0x6A

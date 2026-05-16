@@ -6,7 +6,7 @@ boot-info struct, calls `ExitBootServices`, jumps to kernel entry.
 
 Brought forward to MVP-critical 2026-05-13 after GRUB's multiboot2-EFI
 relocator was found to write to its own `.text` and fault under
-modern strict-W^X UEFI (see `agnosticos/docs/development/iron-boot-testing-log.md`
+modern strict-W^X UEFI (see `agnosticos/docs/development/iron-nuc-zen-log.md`
 § *Diagnosis 2*). The AGNOS sovereignty pattern (cyrius replaced
 gcc/clang/llvm; agnos replaced Linux) eats GRUB next.
 

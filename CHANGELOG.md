@@ -106,7 +106,7 @@ Iron-confirmed cleanup release. Booted to AGNOS shell on archaemenid (NUC AMD) u
   above for the next bisection step.
   `tests/ovmf_smoke.sh` still PASS on QEMU OVMF (kernel reaches
   `Activating scheduler...`).
-  Diagnosis logged in `agnosticos/docs/development/iron-boot-testing-log.md`
+  Diagnosis logged in `agnosticos/docs/development/iron-nuc-zen-log.md`
   § *Attempt 5* and § *Attempt 6*.
 
 
@@ -124,7 +124,7 @@ Iron Attempt 5 on the NUC AMD is the remaining validation pass.
 
 Brought forward to MVP-critical 2026-05-13 after GRUB's multiboot2-EFI
 relocator was found to write to its own `.text` and fault under
-modern strict-W^X UEFI (see `agnosticos/docs/development/iron-boot-testing-log.md`
+modern strict-W^X UEFI (see `agnosticos/docs/development/iron-nuc-zen-log.md`
 § *Diagnosis 2 — 2026-05-13 GRUB relocator W^X* for the forensic
 trail and `agnosticos/docs/development/path-c-sovereign-uefi.md` for
 the plan).
@@ -258,7 +258,7 @@ landed in the v5.11.51–v5.11.53 cycle:
   on QEMU OVMF emulation only. The iron test path is full
   `scripts/install-usb.sh` re-provision (via the agnosticos repo)
   + NUC AMD reboot. Tracked in
-  `agnosticos/docs/development/iron-boot-testing-log.md`.
+  `agnosticos/docs/development/iron-nuc-zen-log.md`.
 - **Cyrius-lsp diagnostic noise** on every save of `src/main.cyr`:
   `[Line 1:1] expected ';', got '='`. LSP is misreading the
   byte-array literal syntax; build is unaffected. Pending upstream

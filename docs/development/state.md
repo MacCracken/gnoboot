@@ -84,7 +84,7 @@ Direct (declared in `cyrius.cyml`):
   `RDI = &boot_info`. Kernel prints banner + 9 init checkpoints
   post-EBS through `Page tables: 1024MB mapped`.
 - **Iron Attempt 5 on NUC AMD** — pending (next gnoboot validation pass;
-  see agnosticos iron-boot log).
+  see agnosticos iron-nuc-zen log).
 
 ## Open
 

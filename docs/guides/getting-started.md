@@ -134,5 +134,5 @@ with gnoboot + agnos kernel, then boot the target hardware
 (currently the NUC AMD per the iron-boot test log). Capture serial
 output via a USB-TTL adapter for forensic continuity.
 
-See [agnosticos iron-boot log](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iron-boot-testing-log.md)
+See [agnosticos iron-nuc-zen log](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iron-nuc-zen-log.md)
 for the running log of attempts.

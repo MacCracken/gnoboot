@@ -110,5 +110,5 @@ The handoff contract:
 ## References
 
 - [agnosticos path-c plan](https://github.com/MacCracken/agnosticos/blob/main/docs/development/path-c-sovereign-uefi.md)
-- [agnosticos iron-boot log § Diagnosis 2](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iron-boot-testing-log.md)
+- [agnosticos iron-nuc-zen log § Diagnosis 2](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iron-nuc-zen-log.md)
 - gnoboot architecture note [001 — Sovereign handoff contract](../architecture/001-sovereign-handoff-contract.md)
