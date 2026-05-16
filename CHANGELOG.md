@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-15
+
+Iron-confirmed cleanup release. Booted to AGNOS shell on archaemenid (NUC AMD) under the cleanup-pass kernel; banner overlay is cosmetic only, handoff itself is verified. CMOS port-I/O diagnostic blocks moved to kernel-side `read-boot-log.sh` ground truth (kernel still stamps via raw asm); gnoboot becomes a slim handoff path with one tightened banner and shared failure-code surface.
+
 ### Changed
 
 - **UEFI-output cleanup** (2026-05-15). Collapsed the 13 per-stage

@@ -13,7 +13,7 @@
 # Usage:
 #   tests/ovmf_smoke.sh                           # uses build/BOOTX64.EFI
 #   tests/ovmf_smoke.sh /path/to/BOOTX64.EFI      # custom binary
-#   EXPECT="gnoboot v0.1.0" tests/ovmf_smoke.sh   # custom expected line
+#   EXPECT="gnoboot v0.2.0" tests/ovmf_smoke.sh   # custom expected line
 #
 # Requires: qemu-system-x86_64, parted, mtools (mformat/mmd/mcopy),
 # edk2-ovmf (Arch: pacman -S edk2-ovmf qemu-base parted mtools).
@@ -22,7 +22,7 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EFI="${1:-$ROOT/build/BOOTX64.EFI}"
-EXPECT="${EXPECT:-gnoboot v0.1.0: handing off to kernel}"
+EXPECT="${EXPECT:-gnoboot v0.2.0: handing off to kernel}"
 
 # OVMF firmware paths differ between distros — probe both common
 # locations. Arch: edk2-ovmf installs to /usr/share/edk2-ovmf/x64/
