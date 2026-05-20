@@ -21,14 +21,14 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot v0.3.0: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# "gnoboot v0.4.0: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
 # Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
 # release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
 # default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
 var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
-    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x33,0x00,    # 'v0.3'
+    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x34,0x00,    # 'v0.4'
     0x2E,0x00, 0x30,0x00, 0x3A,0x00, 0x20,0x00,    # '.0: '
     0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
@@ -100,7 +100,7 @@ var gop_guid[2] = {
 
 # === Sovereign boot-info struct ==========================================
 # Layout per agnosticos/docs/development/path-c-sovereign-uefi.md § Handoff.
-# 112 bytes total (104 inlined fields + 8-byte END tag).
+# 120 bytes total (112 inlined fields + 8-byte END tag).
 #
 # Layout version 2 (v0.1.0+ canary build) — bumped from v1 to inline the
 # framebuffer fields at 0x48-0x60. Originally framebuffer was a type=1
@@ -111,7 +111,7 @@ var gop_guid[2] = {
 #
 #   0x00  u32   magic            = 0x41474E4F ('AGNO')
 #   0x04  u32   version          = 2 (bumped: inlined fb fields)
-#   0x08  u32   struct_size      = 112 (0x70)
+#   0x08  u32   struct_size      = 120 (0x78)
 #   0x0C  u32   flags            (bit 0=serial, bit 1=fb_present)
 #   0x10  u64   initramfs_phys   (filled at runtime or 0 for MVP)
 #   0x18  u64   initramfs_size
@@ -128,7 +128,14 @@ var gop_guid[2] = {
 #   0x5C  u32   fb_pixel_format  (0=RGB, 1=BGR, 2=Bitmask, 3=BltOnly)
 #   0x60  u32   fb_mode_current  (GOP Mode->Mode    — which mode is live)
 #   0x64  u32   fb_mode_max      (GOP Mode->MaxMode — how many modes exist)
-#   0x68  tag[] type=0 END terminator (size=0 ok; walker stops at type==0)
+#   0x68  u64   fb_size          (GOP Mode->FrameBufferSize — UEFI 2.10
+#                                 §11.9.1 authoritative FB extent;
+#                                 kernel uses this for WC remap range
+#                                 in preference to pitch*height when
+#                                 non-zero. Added at Attempt 73 to
+#                                 close the BAR-extent question on the
+#                                 quiet-boot ON garble path.)
+#   0x70  tag[] type=0 END terminator (size=0 ok; walker stops at type==0)
 #
 # fb_mode_current + fb_mode_max overlay the previously-reserved u64 at
 # 0x60. Reserved-slot overlay (not a version bump) because v2 readers
@@ -137,16 +144,25 @@ var gop_guid[2] = {
 # the quiet-boot ON garbled-glyph regression where VGA-spec ON passes
 # (Attempt 71, 2026-05-18) but quiet-boot returns the Attempt-33
 # signature even with the 1.30.11 pf-aware FB guard in place.
-var boot_info[14] = {
+#
+# fb_size at 0x68 — added Attempt 73. Wire version stays 2 because no
+# consumer walks the tag stream (agnos kernel reads inlined fields at
+# fixed offsets only); the END-tag relocation from 0x68 → 0x70 is
+# invisible to fixed-offset readers. Older agnos kernels reading
+# load64(boot_info+0x68) under a v2-without-size gnoboot get 0, which
+# the kernel's fb_size_or_fallback() handles by falling back to
+# pitch*height — same behavior as pre-Attempt-73.
+var boot_info[15] = {
     # 0x00: magic = 0x41474E4F LE
     0x4F, 0x4E, 0x47, 0x41,
     # 0x04: version = 2
     0x02, 0x00, 0x00, 0x00,
-    # 0x08: struct_size = 112 (0x70)
-    0x70, 0x00, 0x00, 0x00,
+    # 0x08: struct_size = 120 (0x78)
+    0x78, 0x00, 0x00, 0x00,
     # 0x0C: flags = 0 (fb_present bit set at runtime if GOP captured;
-    #       everything else zero via trailing-zero fill; END tag at 0x68
-    #       is type=0 because trailing zeros put 0 there too)
+    #       everything else zero via trailing-zero fill; fb_size at 0x68
+    #       filled at runtime alongside the other fb fields; END tag at
+    #       0x70 is type=0 because trailing zeros put 0 there too)
     0x00, 0x00, 0x00, 0x00
 };
 
@@ -316,6 +332,14 @@ fn efi_main(handle, st): i64 {
         var max_mode = load32(gop_mode + 0x00);  # MaxMode (UINT32)
         var cur_mode = load32(gop_mode + 0x04);  # Mode    (UINT32) — current
         var fb_phys  = load64(gop_mode + 0x18);
+        var fb_size  = load64(gop_mode + 0x20);  # FrameBufferSize (UEFI 2.10
+                                                 # §11.9.1) — authoritative
+                                                 # extent of the FB BAR.
+                                                 # Captured Attempt 73 to
+                                                 # let kernel WC-remap the
+                                                 # firmware-reported range
+                                                 # rather than computed
+                                                 # pitch*height.
         var fb_w     = load32(mode_inf + 0x04);
         var fb_h     = load32(mode_inf + 0x08);
         var pf       = load32(mode_inf + 0x0C);
@@ -327,6 +351,7 @@ fn efi_main(handle, st): i64 {
         store32(&boot_info + 0x5C, pf);
         store32(&boot_info + 0x60, cur_mode);  # GOP mode # firmware booted
         store32(&boot_info + 0x64, max_mode);  # GOP mode count available
+        store64(&boot_info + 0x68, fb_size);   # FrameBufferSize (Attempt 73)
         store32(&boot_info + 0x0C, 0x02);      # flags.fb_present = 1
     }
 

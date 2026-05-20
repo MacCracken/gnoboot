@@ -6,6 +6,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-19
+
+`FrameBufferSize` capture release. Adds the third GOP field gnoboot was dropping — `Mode->FrameBufferSize` (UEFI 2.10 §11.9.1, offset 0x20 of `EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE`) — so the agnos kernel can WC-remap the firmware-authoritative FB extent instead of computing `pitch * height` and hoping the BAR matches. Lands as part of the Attempt 73 audit-driven repair bundle targeting the archaemenid Quiet Boot ON garbled-glyph residue from Attempt 72 (geometry CMOS capture showed clean `pitch=width*4 BGRX`, falsifying pitch-padding + pf-≥-2 hypotheses; BAR-placement / BAR-extent divergence is the surviving candidate this release helps close).
+
+### Added
+
+- **GOP `Mode->FrameBufferSize` capture** at `boot_info+0x68` (u64, little-endian). Reads from `gop->Mode->FrameBufferSize` (offset 0x20 of the `EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE` struct) — the authoritative byte-extent of the framebuffer BAR per UEFI 2.10 §11.9.1 ("amount of memory required to hold the frame buffer"). Stamped in the existing GOP-locate block at `efi_main` step 10c, pre-EBS, alongside `fb_phys` / `fb_pitch` / etc. Companion to the kernel-side `fb_size_or_fallback()` accessor that prefers this value over the legacy computed `pitch * height` for WC-remap range selection.
+
+- **Inline struct layout comment** in `src/main.cyr` extended to document the new field and call out the wire-version rationale.
+
+### Changed
+
+- **Boot-info struct size**: `112 (0x70)` → `120 (0x78)`. END tag relocates from offset `0x68` → `0x70`. Wire version stays **v2** because no consumer walks the tag stream — agnos kernel reads inlined fields at fixed offsets only, and the END move is invisible to fixed-offset readers. Pre-Attempt-73 agnos kernels reading `load64(boot_info+0x68)` under a v2-without-size gnoboot would have hit the END tag's zero; the kernel-side `fb_size_or_fallback()` falls back to `pitch * height` on zero — backward-compatible.
+
+- **`boot_info[14]` → `boot_info[15]`**: array sizing follows the struct-size bump (14 × 8 = 112 → 15 × 8 = 120 bytes).
+
+- **Banner**: `gnoboot v0.3.0: handing off to kernel` → `gnoboot v0.4.0: handing off to kernel`. UTF-16LE byte at position 22 updated (0x33 → 0x34).
+
+- **`tests/ovmf_smoke.sh` default `EXPECT`**: `"gnoboot v0.3.0: …"` → `"gnoboot v0.4.0: …"` to match the new banner.
+
+### References
+
+- UEFI 2.10 §11.9.1 — `EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE.FrameBufferSize` definition
+- Linux `drivers/firmware/efi/libstub/screen_info.c` — canonical `FrameBufferSize` capture in the EFI stub
+- FreeBSD `stand/efi/loader/framebuffer.c::efi_find_framebuffer` — same field honored
+- Attempt 73 prep block in `agnosticos/docs/development/iron-nuc-zen-log.md` — full repair audit
+
 ## [0.3.0] — 2026-05-19
 
 FB-handoff diagnostic-extension release. Captures the two GOP fields gnoboot was previously dropping (`Mode->Mode` and `Mode->MaxMode`) so the agnos kernel can see which GOP mode the firmware selected — the load-bearing input for diagnosing the archaemenid quiet-boot vs VGA-spec divergence (Attempt 71: VGA-spec passes, Quiet Boot still returns the Attempt-33 garbled-glyph signature; `pf`-aware-PixelFormat hypothesis falsified). Also pins to cycc 6.0.1 directly (clears the v5.11.x→v6.0.0 toolchain-drift warning, picks up 6.0.1's UEFI-emit `fncallN` patch — see `agnosticos/docs/development/issues/2026-05-19-cycc-6.0.0-uefi-fncall-ud2-emit.md` for the bug write-up that motivated the 6.0.1 cut).
