@@ -90,9 +90,8 @@ var sfs_guid[2] = {
 
 # EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID = 9042a9de-23dc-4a38-96fb-7aded080516a.
 # Captured pre-EBS so the kernel can paint a boot-time canary at entry
-# instruction #1 (Attempt 7 bisection — boot_info-inlined fb fields let
-# raw asm in agnos boot_shim read fb_phys from [rdi+0x48] without
-# walking a tag stream). See iron-nuc-zen-log § Attempt 6.
+# instruction #1: boot_info-inlined fb fields let raw asm in agnos
+# boot_shim read fb_phys from [rdi+0x48] without walking a tag stream.
 var gop_guid[2] = {
     0xDE,0xA9,0x42,0x90, 0xDC,0x23, 0x38,0x4A,
     0x96,0xFB,0x7A,0xDE,0xD0,0x80,0x51,0x6A
@@ -132,26 +131,21 @@ var gop_guid[2] = {
 #                                 §11.9.1 authoritative FB extent;
 #                                 kernel uses this for WC remap range
 #                                 in preference to pitch*height when
-#                                 non-zero. Added at Attempt 73 to
-#                                 close the BAR-extent question on the
-#                                 quiet-boot ON garble path.)
+#                                 non-zero.)
 #   0x70  tag[] type=0 END terminator (size=0 ok; walker stops at type==0)
 #
 # fb_mode_current + fb_mode_max overlay the previously-reserved u64 at
 # 0x60. Reserved-slot overlay (not a version bump) because v2 readers
-# ignored those 8 bytes; new readers (agnos 1.30.12+) can use them to
-# tell which GOP mode the firmware booted with — primary signal for
-# the quiet-boot ON garbled-glyph regression where VGA-spec ON passes
-# (Attempt 71, 2026-05-18) but quiet-boot returns the Attempt-33
-# signature even with the 1.30.11 pf-aware FB guard in place.
+# ignored those 8 bytes; new readers can use them to tell which GOP
+# mode the firmware booted with — primary diagnostic signal for
+# quiet-boot vs VGA-spec scanout divergence on AMD Zen.
 #
-# fb_size at 0x68 — added Attempt 73. Wire version stays 2 because no
-# consumer walks the tag stream (agnos kernel reads inlined fields at
-# fixed offsets only); the END-tag relocation from 0x68 → 0x70 is
-# invisible to fixed-offset readers. Older agnos kernels reading
-# load64(boot_info+0x68) under a v2-without-size gnoboot get 0, which
-# the kernel's fb_size_or_fallback() handles by falling back to
-# pitch*height — same behavior as pre-Attempt-73.
+# fb_size at 0x68. Wire version stays 2 because no consumer walks the
+# tag stream (agnos kernel reads inlined fields at fixed offsets only);
+# the END-tag relocation from 0x68 → 0x70 is invisible to fixed-offset
+# readers. Kernels reading load64(boot_info+0x68) under a gnoboot that
+# doesn't populate the slot get 0, which the kernel's
+# fb_size_or_fallback() handles by falling back to pitch*height.
 var boot_info[15] = {
     # 0x00: magic = 0x41474E4F LE
     0x4F, 0x4E, 0x47, 0x41,
@@ -331,66 +325,32 @@ fn efi_main(handle, st): i64 {
         var cur_mode = load32(gop_mode + 0x04);  # Mode (UINT32) — current
         var max_mode = load32(gop_mode + 0x00);  # MaxMode (UINT32) — needed to gate the bounce
 
-        # gnoboot 0.4.2 — Transient SetMode bounce to force CRTC reprogram.
+        # SetMode bounce before kernel handoff. Matches the convergent
+        # prior-art shape (Linux efifb, EDK2 GraphicsConsoleDxe via Blt,
+        # FreeBSD framebuffer.c, Limine) where SetMode flips firmware-
+        # left scanout to a known state before direct CPU writes are
+        # trusted. On AMD Zen UEFI both same-mode and different-mode
+        # bounce forms are firmware-elided as no-ops — see CHANGELOG
+        # 0.4.1 + 0.4.2 falsification notes — but the call is kept
+        # because (a) it works on non-Zen firmware per the prior art,
+        # (b) it's harmless when elided, and (c) gnoboot's role is to
+        # match the convergent loader shape, not to fix per-vendor
+        # scanout quirks (kernel-side responsibility per memory pin
+        # `project_amd_zen_scanout_residue`).
         #
-        # Background: 0.4.1 called SetMode(gop, cur_mode) ("re-arm current
-        # mode") to flip the firmware-left scanout state to linear before
-        # kernel paint. Falsified at Attempt 74: archaemenid firmware
-        # elides same-mode SetMode as a no-op (no CRTC work happens,
-        # scanout layer stays in whatever non-linear / DCC-compressed
-        # state the BGRT logo path left it in). Quiet Boot ON kept the
-        # Attempt-33 garbled-glyph signature on iron despite the call.
-        #
-        # OSDev forum thread #57150 ("EFI GOP lying about screen
-        # resolution?") names the underlying mechanism: AMD display
-        # engines can leave the scanout buffer tiled or DCC-compressed
-        # at GOP handoff while reporting linear pitch via Mode->Info.
-        # The thread's observation — "switching mode (even setting same
-        # mode) switches framebuffer to linear" — implies the linear
-        # flip is a side effect of the *mode-switch work*, not of any
-        # geometry diff. archaemenid's same-mode optimization elides
-        # that work entirely.
-        #
-        # The untried variant is a transient bounce: SetMode to a
-        # different mode and back. Forces the firmware to do real
-        # mode-switch work twice, ending at the same final geometry
-        # the kernel was already prepared for. Mode 0 is conventionally
-        # the lowest-res fallback every GOP implementation exposes,
-        # most likely to force a real CRTC reprogram; cur_mode==0 case
-        # bounces through mode 1 instead. max_mode<=1 (single-mode
-        # firmware) falls back to the 0.4.1 same-mode call — harmless,
-        # known no-op, diagnostically equivalent.
-        #
-        # No kernel change. boot_info ABI, font, renderer, FB pitch
-        # all stay exactly as they are. Geometry re-read below picks
-        # up whatever ends up live, so any post-bounce mode mismatch
-        # (e.g. second SetMode failure leaving us at bounce_mode) is
-        # captured truthfully in the handoff struct.
-        #
-        # References: OSDev #57150, EDK2 GraphicsConsoleDxe Blt() (the
-        # firmware-side avoidance pattern; unavailable post-EBS to us),
-        # Linux drivers/gpu/drm/amd/display/ (kernel-side DCN reprogram
-        # — deferred fallback if the bounce is also falsified).
+        # Bounce target: mode 0 (or mode 1 if cur_mode==0). Single-mode
+        # firmware (max_mode <= 1) skips the bounce step. Both SetMode
+        # return values are ignored: any failure to enter bounce_mode
+        # still gets followed by SetMode(cur_mode), so the final state
+        # is cur_mode either way, and the post-SetMode geometry re-read
+        # below captures whatever's live in boot_info truthfully.
         var fn_setmode = load64(gop_p + 0x08);
         var bounce_mode = 0;
         if (cur_mode == 0) { bounce_mode = 1; }
-        if (max_mode <= 1) {
-            # Single-mode firmware — can't bounce. Fall back to 0.4.1's
-            # same-mode call (known-falsified but harmless).
-            fncall2(fn_setmode, gop_p, cur_mode);
-        } else {
-            # Bounce away to force CRTC work, then return.
-            var rc_a = fncall2(fn_setmode, gop_p, bounce_mode);
-            if (rc_a != 0) {
-                # Bounce mode rejected — fall back to same-mode best effort.
-                fncall2(fn_setmode, gop_p, cur_mode);
-            } else {
-                # Return to the original mode. If this second call fails
-                # the display stays at bounce_mode; geometry re-read
-                # below captures whatever's live so boot_info matches.
-                fncall2(fn_setmode, gop_p, cur_mode);
-            }
+        if (max_mode > 1) {
+            fncall2(fn_setmode, gop_p, bounce_mode);
         }
+        fncall2(fn_setmode, gop_p, cur_mode);
 
         # Re-read fields AFTER SetMode — firmware is spec-allowed to
         # reallocate the FB BAR + relocate Mode->Info on SetMode, so
