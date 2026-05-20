@@ -6,6 +6,52 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-19
+
+FB-handoff diagnostic-extension release. Captures the two GOP fields gnoboot was previously dropping (`Mode->Mode` and `Mode->MaxMode`) so the agnos kernel can see which GOP mode the firmware selected — the load-bearing input for diagnosing the archaemenid quiet-boot vs VGA-spec divergence (Attempt 71: VGA-spec passes, Quiet Boot still returns the Attempt-33 garbled-glyph signature; `pf`-aware-PixelFormat hypothesis falsified). Also pins to cycc 6.0.1 directly (clears the v5.11.x→v6.0.0 toolchain-drift warning, picks up 6.0.1's UEFI-emit `fncallN` patch — see `agnosticos/docs/development/issues/2026-05-19-cycc-6.0.0-uefi-fncall-ud2-emit.md` for the bug write-up that motivated the 6.0.1 cut).
+
+### Added
+
+- **GOP `Mode->Mode` capture** at `boot_info+0x60` (u32, little-endian). Reads from `gop->Mode->Mode` (offset 0x04 of the `EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE` struct) — which mode the firmware actually booted with. Stamped in the existing GOP-locate block at `efi_main` step 10c, pre-EBS.
+
+- **GOP `Mode->MaxMode` capture** at `boot_info+0x64` (u32, little-endian). Reads from `gop->Mode->MaxMode` (offset 0x00) — how many modes the firmware enumerates total. Helps distinguish "firmware exposes 1 mode only — no mode-set capability" from "firmware ran QueryMode iteration internally and picked a winner."
+
+- **Inline struct layout comment** in `src/main.cyr` extended to document the two new fields and call out the reserved-slot overlay rationale.
+
+- **`docs/architecture/001-sovereign-handoff-contract.md`** updated end-to-end. Was documenting the original v1/80 B layout (pre-v0.1.0 canary); now reflects the actual v2/112 B wire with `fb_phys` / `fb_pitch` / `fb_width` / `fb_height` / `fb_pf` inlined at `0x48-0x60` plus the new `fb_mode_current` / `fb_mode_max` overlay at `0x60-0x68`. Struct size note in body prose corrected from "80 B" to "112 B."
+
+### Changed
+
+- **Banner**: `gnoboot v0.2.0: handing off to kernel` → `gnoboot v0.3.0: handing off to kernel`. UTF-16LE bytes in `msg_pre` updated; one byte changes (0x32 → 0x33 at position 22).
+
+- **`cyrius.cyml` pin**: `cyrius = "5.11.59"` → `"6.0.1"`. Picks up 6.0.1's UEFI-emit `fncallN` regression patch (cycc 6.0.0 had silently emitted `ud2 ud2` sentinels in place of `call` instructions at every `fncallN` site under `CYRIUS_TARGET_EFI=1`; the `CYRIUS_TARGET_EFI → CYRIUS_TARGET_WIN` predefine implication that `lib/fnptr.cyr`'s MS-x64 ABI branch depends on didn't survive the cc5 → cycc rename ceremony, so the body never emit'd). Drift warning cleared.
+
+- **`tests/ovmf_smoke.sh` default `EXPECT`**: `"gnoboot v0.2.0: …"` → `"gnoboot v0.3.0: …"` to match the new banner.
+
+### Wire compatibility
+
+**No struct version bump.** `boot_info` magic `'AGNO'` unchanged; struct version field unchanged at `2`; struct_size unchanged at 112 B. The new fields at `0x60`/`0x64` overlay the previously-reserved u64 — v2 readers that don't know about the overlay see zeros there (the old reserved interpretation) and behave unchanged. Readers that DO know (agnos 1.30.12+) get the GOP mode #. RDI handoff contract, MS x64 → SysV ABI boundary at the kernel jump, ExitBootServices irrevocability — all preserved.
+
+### Build
+
+```
+$ CYRIUS_TARGET_EFI=1 ~/.cyrius/bin/cyrius build src/main.cyr build/BOOTX64.EFI
+compile src/main.cyr -> build/BOOTX64.EFI [x86_64]
+note: 4 unreachable fns (0 bytes — set CYRIUS_DCE=1 to eliminate, CYRIUS_DCE_VERBOSE=1 to list)
+OK
+```
+
+Binary size: **33,792 B** (was 32,768 B at 0.2.0; +1,024 B = the new capture + the extended layout comment block + cycc 6.0.1's slightly-different .text alignment). Zero `ud2` sentinels in `.text` (was 32 paired sentinels under the cycc 6.0.0 regression).
+
+### Smoke
+
+```
+$ tests/ovmf_smoke.sh
+PASS: "gnoboot v0.3.0: handing off to kernel" observed
+```
+
+End-to-end Path-C boot via `agnosticos/scripts/qemu-fb-smoke.sh` against `EXPECT="fb: mode="` also PASSES — the agnos kernel reads the new fields and emits `fb: mode=0/30 phys=0x80000000 pf=1 w=1920 h=1080 pitch=7680` on serial. Iron Attempt 72 (the two-boot VGA-spec vs Quiet Boot diff on archaemenid) is the next move; see `agnosticos/docs/development/iron-nuc-zen-log.md` § Attempt 72 prep.
+
 ## [0.2.0] — 2026-05-15
 
 Iron-confirmed cleanup release. Booted to AGNOS shell on archaemenid (NUC AMD) under the cleanup-pass kernel; banner overlay is cosmetic only, handoff itself is verified. CMOS port-I/O diagnostic blocks moved to kernel-side `read-boot-log.sh` ground truth (kernel still stamps via raw asm); gnoboot becomes a slim handoff path with one tightened banner and shared failure-code surface.

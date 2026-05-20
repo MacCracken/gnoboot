@@ -1,10 +1,10 @@
 [package]
 name = "gnoboot"
-version = "0.2.0"
+version = "0.3.0"
 description = "gnoboot — AGNOS sovereign UEFI bootloader"
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "5.11.53"
+cyrius = "6.0.1"
 
 [build]
 entry = "src/main.cyr"
@@ -17,5 +17,7 @@ output = "BOOTX64.EFI"
 # field yet — flag-driven.
 
 [deps]
-stdlib = []
----
+# v6.0.1: explicit fnptr declaration so `cyrius deps` vendors
+# lib/fnptr.cyr into gnoboot/lib/. Belt-and-suspenders against
+# future cycc-side stdlib-fallback regressions.
+stdlib = ["fnptr"]
