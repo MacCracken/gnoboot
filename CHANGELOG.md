@@ -6,6 +6,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-19
+
+Scanout re-arm release. Adds an explicit `gop->SetMode(gop, cur_mode)` call between GOP capture and ExitBootServices, forcing the firmware display controller to re-establish the CRTC scanout pipe pointing at `FrameBufferBase` before the kernel takes over paint. Targets the archaemenid Quiet Boot ON garbled-glyph residue that survived Attempt 73 (Burn A) — geometry was correct, BAR placement was identifiable, MTRR + PCI audits had ground to compute on, but the kernel was painting to a `FrameBufferBase` the display controller wasn't actually scanning from. The kernel-side audit results from 0.4.0 now sink to CMOS (no serial cable on iron), so a single iron burn answers both "does SetMode close the bug" and "what MTRR/PCI delta did we see."
+
+### Added
+
+- **GOP `SetMode(gop, cur_mode)` call** in `efi_main` step 10c, immediately after capturing `cur_mode` and before any boot_info field writes. Reads the SetMode fn pointer at `gop+0x08` (UEFI 2.10 §11.9.1, `EFI_GRAPHICS_OUTPUT_PROTOCOL.SetMode` member offset) and invokes it via `fncall2(fn_setmode, gop_p, cur_mode)`. Setting the current mode is the minimal-risk variant — no resolution change, just forces firmware to re-arm scanout. Return value intentionally ignored: capture fields stay valid as fallback if SetMode is rejected by firmware. Pattern sourced from Linux `drivers/video/fbdev/efifb.c::efifb_setup` (treats `FrameBufferBase` as authoritative only after explicit `SetMode`), EDK2 `MdeModulePkg/Universal/Console/GraphicsConsoleDxe` (uses the `Blt` service rather than direct framebuffer writes for the same scanout-divergence reason), and FreeBSD `stand/efi/loader/framebuffer.c` (documents AMD APU breakage absent `SetMode`).
+
+### Changed
+
+- **Capture order reshuffled.** `mode_inf` / `max_mode` / `fb_phys` / `fb_size` / `fb_w` / `fb_h` / `pf` / `ppl` reads now happen *after* the `SetMode` call. UEFI 2.10 §11.9.1.2 permits firmware to reallocate the FB BAR and relocate the `Mode->Info` structure pointer on a `SetMode` invocation; reading first and then calling `SetMode` would leave the captured values pointing at the pre-`SetMode` state. The reshuffle keeps `cur_mode` read pre-`SetMode` (the argument needed for the call) and everything else post-`SetMode`.
+
+- **Banner**: `gnoboot v0.4.0: handing off to kernel` → `gnoboot v0.4.1: handing off to kernel`. UTF-16LE byte at character position 13 (the second '0' in 'v0.4.0') updated `0x30` → `0x31`.
+
+- **`tests/ovmf_smoke.sh` default `EXPECT`**: `"gnoboot v0.4.0: …"` → `"gnoboot v0.4.1: …"` to match the new banner.
+
+### Wire compatibility
+
+**No struct version bump.** boot_info magic `'AGNO'`, struct version `2`, struct_size `0x78`, field offsets — all unchanged from 0.4.0. The SetMode call is gnoboot-internal and invisible to the kernel-side ABI. Wire format identical.
+
+### References
+
+- UEFI 2.10 §11.9.1 — `EFI_GRAPHICS_OUTPUT_PROTOCOL.SetMode` definition + scanout side effects
+- Linux `drivers/video/fbdev/efifb.c::efifb_setup` — canonical pattern for "treat FrameBufferBase as scanout-authoritative only after SetMode"
+- EDK2 `MdeModulePkg/Universal/Console/GraphicsConsoleDxe` — `Blt()`-based avoidance of direct FB writes
+- FreeBSD `stand/efi/loader/framebuffer.c` — AMD APU breakage caveat
+- Burn-A iron result write-up in `agnosticos/docs/development/iron-nuc-zen-log.md` § Attempt 73 — falsifications and the scanout-divergence diagnosis that motivated this release
+
 ## [0.4.0] — 2026-05-19
 
 `FrameBufferSize` capture release. Adds the third GOP field gnoboot was dropping — `Mode->FrameBufferSize` (UEFI 2.10 §11.9.1, offset 0x20 of `EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE`) — so the agnos kernel can WC-remap the firmware-authoritative FB extent instead of computing `pitch * height` and hoping the BAR matches. Lands as part of the Attempt 73 audit-driven repair bundle targeting the archaemenid Quiet Boot ON garbled-glyph residue from Attempt 72 (geometry CMOS capture showed clean `pitch=width*4 BGRX`, falsifying pitch-padding + pf-≥-2 hypotheses; BAR-placement / BAR-extent divergence is the surviving candidate this release helps close).

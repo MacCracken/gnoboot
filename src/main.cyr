@@ -21,7 +21,7 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot v0.4.0: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# "gnoboot v0.4.1: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
 # Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
 # release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
 # default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
@@ -29,7 +29,7 @@ var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
     0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x34,0x00,    # 'v0.4'
-    0x2E,0x00, 0x30,0x00, 0x3A,0x00, 0x20,0x00,    # '.0: '
+    0x2E,0x00, 0x31,0x00, 0x3A,0x00, 0x20,0x00,    # '.1: '
     0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
     0x6F,0x00, 0x66,0x00, 0x66,0x00, 0x20,0x00,    # 'off '
@@ -328,18 +328,38 @@ fn efi_main(handle, st): i64 {
     if (rc == 0) {
         var gop_p    = load64(&gop_out);
         var gop_mode = load64(gop_p + 0x18);
+        var cur_mode = load32(gop_mode + 0x04);  # Mode (UINT32) — current
+
+        # gnoboot 0.4.1 — Re-arm scanout via SetMode(gop, cur_mode).
+        #
+        # UEFI 2.10 §11.9.1.2: SetMode is the canonical way to force the
+        # firmware to re-establish the display-controller scanout pipe
+        # pointing at FrameBufferBase. Some AMD Zen iGPU firmware paths
+        # (notably archaemenid's Quiet Boot ON) leave the CRTC scanout
+        # register pointing at a different page than GOP-reported
+        # FrameBufferBase after handoff, producing the Attempt-33 garbled-
+        # glyph signature when kernel paint targets the GOP base.
+        #
+        # Setting the *current* mode (not a new one) is the minimal-risk
+        # variant — no resolution change, just forces firmware re-sync.
+        # Pattern sourced from Linux drivers/video/fbdev/efifb.c (treats
+        # FrameBufferBase as authoritative only after explicit SetMode)
+        # and EDK2 MdeModulePkg/Universal/Console/GraphicsConsoleDxe
+        # (avoids direct FB write via the Blt service for exactly this
+        # reason). FreeBSD stand/efi/loader/framebuffer.c documents the
+        # same caveat for AMD APUs.
+        #
+        # Ignored on non-zero return — capture fields stay valid as fallback.
+        var fn_setmode = load64(gop_p + 0x08);
+        fncall2(fn_setmode, gop_p, cur_mode);
+
+        # Re-read fields AFTER SetMode — firmware is spec-allowed to
+        # reallocate the FB BAR + relocate Mode->Info on SetMode, so
+        # post-SetMode values are the authoritative ones for handoff.
         var mode_inf = load64(gop_mode + 0x08);
         var max_mode = load32(gop_mode + 0x00);  # MaxMode (UINT32)
-        var cur_mode = load32(gop_mode + 0x04);  # Mode    (UINT32) — current
         var fb_phys  = load64(gop_mode + 0x18);
-        var fb_size  = load64(gop_mode + 0x20);  # FrameBufferSize (UEFI 2.10
-                                                 # §11.9.1) — authoritative
-                                                 # extent of the FB BAR.
-                                                 # Captured Attempt 73 to
-                                                 # let kernel WC-remap the
-                                                 # firmware-reported range
-                                                 # rather than computed
-                                                 # pitch*height.
+        var fb_size  = load64(gop_mode + 0x20);  # FrameBufferSize (UEFI 2.10 §11.9.1)
         var fb_w     = load32(mode_inf + 0x04);
         var fb_h     = load32(mode_inf + 0x08);
         var pf       = load32(mode_inf + 0x0C);
@@ -351,7 +371,7 @@ fn efi_main(handle, st): i64 {
         store32(&boot_info + 0x5C, pf);
         store32(&boot_info + 0x60, cur_mode);  # GOP mode # firmware booted
         store32(&boot_info + 0x64, max_mode);  # GOP mode count available
-        store64(&boot_info + 0x68, fb_size);   # FrameBufferSize (Attempt 73)
+        store64(&boot_info + 0x68, fb_size);   # FrameBufferSize
         store32(&boot_info + 0x0C, 0x02);      # flags.fb_present = 1
     }
 
