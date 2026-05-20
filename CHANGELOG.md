@@ -6,6 +6,50 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-05-20
+
+Transient SetMode-bounce release. Replaces 0.4.1's `SetMode(gop, cur_mode)` ("same-mode re-arm") with a two-call bounce: `SetMode(gop, bounce_mode)` → `SetMode(gop, cur_mode)`. Targets the surviving Quiet Boot ON garbled-glyph residue from Attempt 77 (iron 2026-05-20) on archaemenid, where 0.4.1's same-mode call was falsified — firmware elides same-mode SetMode as a no-op, no CRTC reprogram happens, and the scanout buffer stays in whatever non-linear / DCC-compressed state the BGRT logo path left it in. Per OSDev forum #57150 the linear flip is a side effect of the *mode-switch work*, not of any geometry diff; bouncing to a different mode and back forces the firmware to do real work that can't be elided, ending at the same final geometry the kernel was already prepared for.
+
+### Changed
+
+- **`SetMode` call in `efi_main` step 10c** expanded from a single `fncall2(fn_setmode, gop_p, cur_mode)` to a guarded two-call bounce:
+  - `bounce_mode = 0` (or `1` when `cur_mode == 0`) — mode 0 is conventionally the lowest-res fallback every GOP implementation exposes, most likely to force a real CRTC reprogram.
+  - `max_mode <= 1` (single-mode firmware) falls through to the 0.4.1 same-mode call — known-falsified but harmless, diagnostically equivalent.
+  - First `SetMode(gop, bounce_mode)` failure (`EFI_UNSUPPORTED` / `EFI_DEVICE_ERROR`) falls back to a same-mode call so the firmware has a chance to reset to a known state.
+  - Second `SetMode(gop, cur_mode)` failure leaves the display at `bounce_mode`; the post-SetMode geometry re-read at line 360+ captures whatever's actually live so `boot_info` reflects the true landed mode (no kernel-side panic, no inconsistent state, just degraded resolution).
+- **`max_mode` read** moved from post-SetMode geometry re-read up to immediately after `cur_mode` (needed to gate the bounce branch). All other field reads (`mode_inf`, `fb_phys`, `fb_size`, `fb_w`, `fb_h`, `pf`, `ppl`) stay post-SetMode where 0.4.1 placed them.
+- **Banner**: `gnoboot v0.4.1: handing off to kernel` → `gnoboot v0.4.2: handing off to kernel`. UTF-16LE byte at character position 13 (the second digit in 'v0.4.1') updated `0x31` → `0x32`.
+- **`tests/ovmf_smoke.sh` default `EXPECT`**: `"gnoboot v0.4.1: …"` → `"gnoboot v0.4.2: …"` to match the new banner.
+
+### Falsifies
+
+- **0.4.1's same-mode SetMode hypothesis.** UEFI 2.10 §11.9.1.2 doesn't *require* firmware to elide same-mode SetMode, but archaemenid's AMD Zen iGPU firmware does in practice — confirmed by Attempt 74 iron (no visual change post-call) and aligned with OSDev #57150's observation that the linear flip is downstream of *the mode-switch work*, not of mode parameter changes. The 0.4.1 release notes claimed Linux `efifb.c` / EDK2 `GraphicsConsoleDxe` / FreeBSD `framebuffer.c` precedent for the same-mode form — those references actually motivate "SetMode is required before trusting FrameBufferBase" but don't pin down whether same-mode or different-mode SetMode is the operative pattern. 0.4.2 picks different-mode.
+
+### Visible side effect
+
+A real mode switch causes the display to flicker briefly during boot — through `bounce_mode` (typically 640×480 or similar low-res) and back to `cur_mode`. Acceptable; documents itself as the new expected boot signature. If iron shows no flicker, that's a tell that the firmware is also eliding the different-mode bounce.
+
+### Wire compatibility
+
+**No struct version bump.** boot_info magic `'AGNO'`, struct version `2`, struct_size `0x78`, field offsets — all unchanged from 0.4.0/0.4.1. The bounce is gnoboot-internal and invisible to the kernel-side ABI. Wire format identical.
+
+### Decisive outcome shape (pre-bound iron decision tree)
+
+- **Quiet Boot legible end-to-end at 2560×1440 after the bounce**: H2 confirmed, durable workaround. Close 1.30.12. Tag this release.
+- **Quiet Boot still banded, identical signature to Attempt 77**: bounce is also being elided or the divergence is deeper than per-mode state (e.g., DCC compression is set per-buffer, not per-mode). Escalates to kernel-side DCN reprogram (deferred multi-kiloline work).
+- **Quiet Boot banded, *different* signature**: bounce changed scanout state but didn't fully fix it; new artifact pattern may suggest tile-format vs DCC distinction.
+- **Display ends at unexpected resolution**: second SetMode failed; iron post-mortem reads `boot_info.fb_mode_current` to learn the actual landed mode.
+- **VGA-spec path regression**: bounce broke the previously-working VGA-spec path. Revert to 0.4.1; bounce isn't viable on this firmware; escalate directly to DCN reprogram.
+
+### References
+
+- OSDev forum thread #57150 — *"EFI GOP lying about screen resolution?"* — names the AMD tiled/DCC scanout mechanism and the mode-switch-work-flips-linear observation that motivates the bounce form.
+- EDK2 `MdeModulePkg/Universal/Console/GraphicsConsoleDxe` — uses GOP `Blt()` rather than direct FB writes; `Blt()` unavailable post-EBS to gnoboot, hence the SetMode-driven workaround.
+- Linux `drivers/gpu/drm/amd/display/` (DCN init) — kernel-side scanout reprogramming reference impl; the deferred fallback if the bounce is also falsified.
+- `freebsd/drm-kmod` issue #60 — confirms upstream consensus that firmware-left state on AMD iGPUs at GOP handoff is untrustable for direct CPU writes.
+- Iron Attempt 74 (`agnosticos/docs/development/iron-nuc-zen-log.md`) — falsified the 0.4.1 same-mode form.
+- Iron Attempt 77 (same file) — research pass that identified the bounce variant as the next untried lever; H1 (renderer math) + H3 (font layout) falsified by code audit, H2 (FB-layer divergence) supported by prior art.
+
 ## [0.4.1] — 2026-05-19
 
 Scanout re-arm release. Adds an explicit `gop->SetMode(gop, cur_mode)` call between GOP capture and ExitBootServices, forcing the firmware display controller to re-establish the CRTC scanout pipe pointing at `FrameBufferBase` before the kernel takes over paint. Targets the archaemenid Quiet Boot ON garbled-glyph residue that survived Attempt 73 (Burn A) — geometry was correct, BAR placement was identifiable, MTRR + PCI audits had ground to compute on, but the kernel was painting to a `FrameBufferBase` the display controller wasn't actually scanning from. The kernel-side audit results from 0.4.0 now sink to CMOS (no serial cable on iron), so a single iron burn answers both "does SetMode close the bug" and "what MTRR/PCI delta did we see."

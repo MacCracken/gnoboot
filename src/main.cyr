@@ -21,7 +21,7 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot v0.4.1: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# "gnoboot v0.4.2: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
 # Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
 # release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
 # default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
@@ -29,7 +29,7 @@ var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
     0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x34,0x00,    # 'v0.4'
-    0x2E,0x00, 0x31,0x00, 0x3A,0x00, 0x20,0x00,    # '.1: '
+    0x2E,0x00, 0x32,0x00, 0x3A,0x00, 0x20,0x00,    # '.2: '
     0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
     0x6F,0x00, 0x66,0x00, 0x66,0x00, 0x20,0x00,    # 'off '
@@ -329,35 +329,73 @@ fn efi_main(handle, st): i64 {
         var gop_p    = load64(&gop_out);
         var gop_mode = load64(gop_p + 0x18);
         var cur_mode = load32(gop_mode + 0x04);  # Mode (UINT32) — current
+        var max_mode = load32(gop_mode + 0x00);  # MaxMode (UINT32) — needed to gate the bounce
 
-        # gnoboot 0.4.1 — Re-arm scanout via SetMode(gop, cur_mode).
+        # gnoboot 0.4.2 — Transient SetMode bounce to force CRTC reprogram.
         #
-        # UEFI 2.10 §11.9.1.2: SetMode is the canonical way to force the
-        # firmware to re-establish the display-controller scanout pipe
-        # pointing at FrameBufferBase. Some AMD Zen iGPU firmware paths
-        # (notably archaemenid's Quiet Boot ON) leave the CRTC scanout
-        # register pointing at a different page than GOP-reported
-        # FrameBufferBase after handoff, producing the Attempt-33 garbled-
-        # glyph signature when kernel paint targets the GOP base.
+        # Background: 0.4.1 called SetMode(gop, cur_mode) ("re-arm current
+        # mode") to flip the firmware-left scanout state to linear before
+        # kernel paint. Falsified at Attempt 74: archaemenid firmware
+        # elides same-mode SetMode as a no-op (no CRTC work happens,
+        # scanout layer stays in whatever non-linear / DCC-compressed
+        # state the BGRT logo path left it in). Quiet Boot ON kept the
+        # Attempt-33 garbled-glyph signature on iron despite the call.
         #
-        # Setting the *current* mode (not a new one) is the minimal-risk
-        # variant — no resolution change, just forces firmware re-sync.
-        # Pattern sourced from Linux drivers/video/fbdev/efifb.c (treats
-        # FrameBufferBase as authoritative only after explicit SetMode)
-        # and EDK2 MdeModulePkg/Universal/Console/GraphicsConsoleDxe
-        # (avoids direct FB write via the Blt service for exactly this
-        # reason). FreeBSD stand/efi/loader/framebuffer.c documents the
-        # same caveat for AMD APUs.
+        # OSDev forum thread #57150 ("EFI GOP lying about screen
+        # resolution?") names the underlying mechanism: AMD display
+        # engines can leave the scanout buffer tiled or DCC-compressed
+        # at GOP handoff while reporting linear pitch via Mode->Info.
+        # The thread's observation — "switching mode (even setting same
+        # mode) switches framebuffer to linear" — implies the linear
+        # flip is a side effect of the *mode-switch work*, not of any
+        # geometry diff. archaemenid's same-mode optimization elides
+        # that work entirely.
         #
-        # Ignored on non-zero return — capture fields stay valid as fallback.
+        # The untried variant is a transient bounce: SetMode to a
+        # different mode and back. Forces the firmware to do real
+        # mode-switch work twice, ending at the same final geometry
+        # the kernel was already prepared for. Mode 0 is conventionally
+        # the lowest-res fallback every GOP implementation exposes,
+        # most likely to force a real CRTC reprogram; cur_mode==0 case
+        # bounces through mode 1 instead. max_mode<=1 (single-mode
+        # firmware) falls back to the 0.4.1 same-mode call — harmless,
+        # known no-op, diagnostically equivalent.
+        #
+        # No kernel change. boot_info ABI, font, renderer, FB pitch
+        # all stay exactly as they are. Geometry re-read below picks
+        # up whatever ends up live, so any post-bounce mode mismatch
+        # (e.g. second SetMode failure leaving us at bounce_mode) is
+        # captured truthfully in the handoff struct.
+        #
+        # References: OSDev #57150, EDK2 GraphicsConsoleDxe Blt() (the
+        # firmware-side avoidance pattern; unavailable post-EBS to us),
+        # Linux drivers/gpu/drm/amd/display/ (kernel-side DCN reprogram
+        # — deferred fallback if the bounce is also falsified).
         var fn_setmode = load64(gop_p + 0x08);
-        fncall2(fn_setmode, gop_p, cur_mode);
+        var bounce_mode = 0;
+        if (cur_mode == 0) { bounce_mode = 1; }
+        if (max_mode <= 1) {
+            # Single-mode firmware — can't bounce. Fall back to 0.4.1's
+            # same-mode call (known-falsified but harmless).
+            fncall2(fn_setmode, gop_p, cur_mode);
+        } else {
+            # Bounce away to force CRTC work, then return.
+            var rc_a = fncall2(fn_setmode, gop_p, bounce_mode);
+            if (rc_a != 0) {
+                # Bounce mode rejected — fall back to same-mode best effort.
+                fncall2(fn_setmode, gop_p, cur_mode);
+            } else {
+                # Return to the original mode. If this second call fails
+                # the display stays at bounce_mode; geometry re-read
+                # below captures whatever's live so boot_info matches.
+                fncall2(fn_setmode, gop_p, cur_mode);
+            }
+        }
 
         # Re-read fields AFTER SetMode — firmware is spec-allowed to
         # reallocate the FB BAR + relocate Mode->Info on SetMode, so
         # post-SetMode values are the authoritative ones for handoff.
         var mode_inf = load64(gop_mode + 0x08);
-        var max_mode = load32(gop_mode + 0x00);  # MaxMode (UINT32)
         var fb_phys  = load64(gop_mode + 0x18);
         var fb_size  = load64(gop_mode + 0x20);  # FrameBufferSize (UEFI 2.10 §11.9.1)
         var fb_w     = load32(mode_inf + 0x04);
