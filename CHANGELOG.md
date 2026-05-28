@@ -8,6 +8,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 > **Next-cycle signpost for the AMD-Zen Quiet-Boot scanout residue** (closed out at 0.4.2): the gnoboot-side GOP `SetMode` lever is exhausted on archaemenid. **Do NOT propose another SetMode variant** — both same-mode (0.4.1, Attempt 74) and different-mode bounce (0.4.2, Attempt 78) are firmware-elided on AMD Zen UEFI. Next channel for the bug is **kernel-side**, not gnoboot-side: either a minimal-redesign port of Linux's HUBP `clear_tiling` sequence (per amd-gfx ML; 3-6 MMIO writes per HUBP; DCN1→DCN3 register offsets inherited; Cezanne PCI BAR0 of `1002:1638`), OR an architectural decision about adopting shadow-buffer semantics for the AGNOS FB-console layer (simpledrm-style, per `archintel` Attempt 79 cross-check finding). Intel cross-check on archintel was structurally inconclusive (no BGRT table, hybrid Intel+NVIDIA GPU, Linux uses simpledrm). Older single-iGPU Intel box with BGRT-publishing firmware is the parked future discriminator. Full closeout record in `agnosticos/docs/development/iron-nuc-zen-log.md` § Attempt 79; memory pin: `project_amd_zen_scanout_residue`.
 
+## [0.4.3] — 2026-05-28
+
+Toolchain-pin release. Advances the `cyrius.cyml [package].cyrius` pin from
+`6.0.1` to `6.0.14`, resolving the manifest-vs-wrapper drift the cycc emits as
+a `toolchain drift` warning. No source-logic change beyond the banner version
+bump; the binary rebuilds clean and both gates pass.
+
+### Changed
+
+- **`cyrius.cyml` toolchain pin**: `6.0.1` → `6.0.14`. cycc on the build host
+  is already 6.0.14; the pin now matches, clearing the snapshot drift warning.
+- **Banner**: `gnoboot v0.4.2: handing off to kernel` → `gnoboot v0.4.3: …`.
+  UTF-16LE byte at character position 13 (the second digit in 'v0.4.2')
+  updated `0x32` → `0x33` in `src/main.cyr` `msg_pre`.
+- **`tests/ovmf_smoke.sh` default `EXPECT`**: `"gnoboot v0.4.2: …"` →
+  `"gnoboot v0.4.3: …"` to match the new banner.
+
+### Wire compatibility
+
+**No struct version bump.** boot_info magic `'AGNO'`, struct version `2`,
+struct_size `0x78`, field offsets — all unchanged from 0.4.0/0.4.1/0.4.2.
+The SetMode-bounce code from 0.4.2 is retained as-is (no new lever; see the
+[Unreleased] signpost). Wire format identical.
+
+### Verified
+
+- `tests/verify_pe.sh` PASS — DOS magic, PE sig, COFF Char (no RELOCS_STRIPPED),
+  Subsystem `0x000A`, DllChar NX_COMPAT.
+- `tests/ovmf_smoke.sh` PASS — `"gnoboot v0.4.3: handing off to kernel"`
+  observed on ConOut under qemu + OVMF.
+
 ## [0.4.2] — 2026-05-20 — **FALSIFIED on iron Attempt 78 (2026-05-20)**
 
 > **Iron result**: No flicker observed on VGA or HDMI; Quiet Boot banded-glyph signature identical to Attempt 77 (0.4.1). Per the pre-bound decision tree below ("If iron shows no flicker, that's a tell that the firmware is also eliding the different-mode bounce"), archaemenid's AMD Zen UEFI firmware elides the different-mode SetMode bounce in addition to the same-mode form falsified at Attempt 74. The OSDev #57150 recipe — that *the work of switching modes* flips the scanout buffer to linear regardless of mode diff — does not generalize to this firmware. Honest caveat: gnoboot 0.4.2 does not stamp `rc_a` from the bounce-mode SetMode (see `src/main.cyr:383`), so CMOS alone can't distinguish (a) bounce ran with both calls elided, vs (b) firmware rejected `bounce_mode = 1` and fell back to the same-mode call. Both routes have the same destination — GOP SetMode at gnoboot post-FB-read time isn't a viable lever on this firmware — so resolving (a) vs (b) doesn't change the next move. Per `feedback_no_instrumentation_means_no_instrumentation`, adding the stamp slot is off-table.

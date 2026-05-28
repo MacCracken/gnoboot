@@ -22,7 +22,7 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EFI="${1:-$ROOT/build/BOOTX64.EFI}"
-EXPECT="${EXPECT:-gnoboot v0.4.2: handing off to kernel}"
+EXPECT="${EXPECT:-gnoboot v0.4.3: handing off to kernel}"
 
 # OVMF firmware paths differ between distros — probe both common
 # locations. Arch: edk2-ovmf installs to /usr/share/edk2-ovmf/x64/

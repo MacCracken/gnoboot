@@ -3,21 +3,21 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-05-15 (v0.2 cycle — canary/output cleanup)
+> **Last refresh**: 2026-05-28 (v0.4.3 — cyrius toolchain pin bump to 6.0.14)
 
 ## Version
 
-**0.1.0** — released 2026-05-13. First gnoboot release. AGNOS MVP
-handoff verified end-to-end on QEMU OVMF.
-
-**v0.2 cycle in progress** on branch `0.2`. No new ABI; canary code
-removed, pre-EBS output consolidated. See CHANGELOG.md [Unreleased]
-for the running summary; M1 in `roadmap.md` is the gate for cutting
-v0.2.0.
+**0.4.3** — released 2026-05-28. Toolchain-pin release: advances the
+`cyrius.cyml` pin from `6.0.1` to `6.0.14` (clears manifest-vs-wrapper
+drift). No ABI change; boot_info struct version `2`, magic `'AGNO'`,
+struct_size `0x78` unchanged since 0.4.0. The 0.4.2 SetMode-bounce code
+is retained as-is — the gnoboot-side GOP `SetMode` lever for the AMD-Zen
+Quiet-Boot scanout residue is exhausted (see CHANGELOG [Unreleased]
+signpost; next channel is kernel-side).
 
 ## Toolchain
 
-- **Cyrius pin**: `5.11.53` (in `cyrius.cyml [package].cyrius`)
+- **Cyrius pin**: `6.0.14` (in `cyrius.cyml [package].cyrius`)
 - Required cyrius features:
     - 5.11.49 — `_TARGET_EFI_APPLICATION` PE32+ EFI emit mode
     - 5.11.51 — byte-array literal `var foo[N] = { 0x.., 0x.., ... };`
