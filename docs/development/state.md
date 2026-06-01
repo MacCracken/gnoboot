@@ -3,7 +3,7 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-05-28 (v0.4.3 — cyrius toolchain pin bump to 6.0.14)
+> **Last refresh**: 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality — initramfs `boot_info`-fill flagged **P1** as the ISO live-`.iso` gate; the iron-validation, scheduler-stall, and boot_info-deref items closed/corrected). Prior: 2026-05-28 (v0.4.3 — cyrius toolchain pin bump to 6.0.14).
 
 ## Version
 
@@ -83,16 +83,31 @@ Direct (declared in `cyrius.cyml`):
   (251 KB ELF64) into `0x100000`, ExitBootServices succeeds, jumps with
   `RDI = &boot_info`. Kernel prints banner + 9 init checkpoints
   post-EBS through `Page tables: 1024MB mapped`.
-- **Iron Attempt 5 on NUC AMD** — pending (next gnoboot validation pass;
-  see agnosticos iron-nuc-zen log).
+- **Iron-validated on NUC AMD** — gnoboot's Path-C handoff is proven on
+  archaemenid (Zen) across the agnos 1.40.x exec-from-disk arc (the
+  `14013_final*` burn, 2026-05-31): UEFI → gnoboot → agnos boots clean through
+  `Activating scheduler` → `Launching kybernet`.
 
 ## Open
 
-- **No agnos-kernel-side reading of `boot_info_ptr` yet** — kernel
-  stashes the pointer but doesn't dereference fields. Memmap walking,
-  cmdline, RSDP propagation are post-MVP. Tracked in agnos roadmap 1.30.x.
-- **Iron Attempt 5** — USB re-provision + NUC AMD reboot pending user.
-- **Scheduler-under-UEFI stall** (downstream of gnoboot; agnos issue)
-  — kernel reaches `Activating scheduler`, then `pt_init`/`apic_init`
-  fixed-physical assumptions break the post-scheduler path. Tracked
-  in [agnos state.md § Open investigation](https://github.com/MacCracken/agnos/blob/main/docs/development/state.md).
+- **`initramfs_phys` / `initramfs_size` fill — P1 (ISO live-`.iso` gate).**
+  gnoboot reserves these fields (struct v2, offsets `0x10`/`0x18`) but passes
+  **0** (MVP). The agnosticos read-only live `.iso` path needs gnoboot to load
+  `\boot\initramfs.cpio.gz` into an `AllocatePages` region and fill the pair so
+  the kernel (`core/initrd.cyr`) runs root from RAM. See
+  [`roadmap.md` § Immediate priority](roadmap.md) + agnosticos
+  `iso-stage4-plan.md` § N1b. **The writable `.img` ISO cut needs none of this.**
+  `cmdline_phys` (M2 cmdline half) + `acpi_rsdp_phys` (M3) ride the same release.
+- **Kernel now reads the inlined FB fields** (`fb_phys`/`pitch`/`width`/`height`)
+  — supersedes the old "kernel stashes the pointer but doesn't dereference
+  fields" note; the agnos 1.40.9 `boot_info_copy` fix reads them (it was the
+  root cause of the ring-3 #PF — `fb_fb_phys` read `boot_info` ≥4 GB under the
+  per-process CR3). The only *unconsumed* fields are the not-yet-filled ones
+  above (initramfs/cmdline/RSDP) — because gnoboot passes 0, not because the
+  kernel ignores them.
+- **Scheduler-under-UEFI stall — CLOSED.** Was "kernel reaches
+  `Activating scheduler` then resets." Root cause was an agnos-side bug (a dead
+  exec proc resurrected by the scheduler), fixed at **agnos 1.40.10** (register
+  kmain proc 0 + idle proc 1 on the boot CR3 before activation); iron-validated
+  on the `14013_final*` burn — boots through to `Launching kybernet`. Not a
+  gnoboot issue.

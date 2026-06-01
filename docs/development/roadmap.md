@@ -32,7 +32,37 @@ spinoffs) can depend on a stable boot ABI.
 - [ ] **v1 retrospective drafted** in `docs/development/retro/v1_cycle.md`
       — what worked across v0.1 → v1.0, what didn't, what carries forward.
 
+## Immediate priority (P1) — feature-fill the boot_info struct (ISO distribution gate)
+
+> Added 2026-06-01. The M2–M4 `boot_info` feature-fills (`cmdline_phys`,
+> `initramfs_phys`/`size`, `acpi_rsdp_phys`) **slipped**: their originally-
+> planned v0.3.0–v0.5.0 slots were instead consumed by the unplanned AMD-Zen
+> scanout-residue arc (v0.3.0 GOP `Mode`/`MaxMode` capture, v0.4.0
+> `FrameBufferSize`, v0.4.1/0.4.2 `SetMode` bounce) + the v0.4.3 toolchain pin.
+> gnoboot is at **v0.4.3** with these fields still **reserved-but-zero**
+> (struct v2, size `0x78`). Begins after the agnosticos info/doc cycle.
+
+**P1 — `initramfs_phys` / `initramfs_size` fill** (the M2 initramfs half). This
+is the upstream dependency for the agnosticos **ISO Stage-4 read-only live
+`.iso` path** ([`iso-stage4-plan.md` § N1b](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iso-stage4-plan.md)).
+Optical / read-only media can't carry a writable ext4 root, so the live ISO
+needs gnoboot to load `\boot\initramfs.cpio.gz` into an `AllocatePages` region
+and fill the pair, so the kernel (`core/initrd.cyr`, the RAM-disk reader) can
+run root from RAM. **Until this lands, the ISO cut is limited to the writable
+`.img` form** (iso-stage4-plan § N1a, which needs no gnoboot change). Slot:
+next feature release (~v0.5.0).
+
+**Riding along** (same release, same mechanism — read an ESP file / walk a
+firmware table → fill a reserved `boot_info` field): `cmdline_phys` (M2 cmdline
+half) + `acpi_rsdp_phys` (M3). Not ISO-gating, but identical "populate a
+reserved field" work, and the struct is already sized for them.
+
 ## Milestones — v0.x → v1.0
+
+> **⚠ Version labels below are stale.** The `v0.3.0`/`v0.4.0`/`v0.5.0` slots
+> M2–M4 were assigned to already shipped the scanout-residue arc instead (see
+> *Immediate priority* above). These feature-fills re-slot starting at the next
+> feature release; the M-numbering is kept for continuity, not the versions.
 
 ### M0 — v0.1.0 — ✅ shipped 2026-05-13
 
@@ -54,9 +84,10 @@ Closes the only outstanding v0.1.0 validation. No new gnoboot
 features; this is a confidence cut. Whatever the iron run surfaces
 (if anything) drives v0.2.x patches.
 
-### M2 — v0.3.0 — cmdline + initramfs
+### M2 — cmdline + initramfs — ⚠ SLIPPED; initramfs half is now **P1** (see *Immediate priority* above)
 
-Two adjacent fills of `boot_info` fields that are currently 0:
+Two adjacent fills of `boot_info` fields that are currently 0 (the planned
+v0.3.0 slot shipped GOP capture instead):
 
 - **`cmdline_phys`** — read kernel command line from ESP file
   `\boot\cmdline` (NUL-terminated UTF-8); AllocatePages a page,
