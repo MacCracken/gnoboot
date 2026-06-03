@@ -32,30 +32,25 @@ spinoffs) can depend on a stable boot ABI.
 - [ ] **v1 retrospective drafted** in `docs/development/retro/v1_cycle.md`
       — what worked across v0.1 → v1.0, what didn't, what carries forward.
 
-## Immediate priority (P1) — feature-fill the boot_info struct (ISO distribution gate)
+## boot_info feature-fill — ✅ LANDED at v0.5.0 (gnoboot side)
 
-> Added 2026-06-01. The M2–M4 `boot_info` feature-fills (`cmdline_phys`,
-> `initramfs_phys`/`size`, `acpi_rsdp_phys`) **slipped**: their originally-
-> planned v0.3.0–v0.5.0 slots were instead consumed by the unplanned AMD-Zen
-> scanout-residue arc (v0.3.0 GOP `Mode`/`MaxMode` capture, v0.4.0
-> `FrameBufferSize`, v0.4.1/0.4.2 `SetMode` bounce) + the v0.4.3 toolchain pin.
-> gnoboot is at **v0.4.3** with these fields still **reserved-but-zero**
-> (struct v2, size `0x78`). Begins after the agnosticos info/doc cycle.
+> Added 2026-06-01 as P1, **shipped 2026-06-03 at v0.5.0**. gnoboot now fills
+> `initramfs_phys`/`size` (0x10/0x18) from `\boot\initramfs`, `cmdline_phys`
+> (0x20) from `\boot\cmdline`, and `acpi_rsdp_phys` (0x38) from the EFI
+> Configuration Table — all optional + benign-on-failure, no ABI change. Full
+> detail in the v0.5.0 milestone below + CHANGELOG `[0.5.0]`.
 
-**P1 — `initramfs_phys` / `initramfs_size` fill** (the M2 initramfs half). This
-is the upstream dependency for the agnosticos **ISO Stage-4 read-only live
-`.iso` path** ([`iso-stage4-plan.md` § N1b](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iso-stage4-plan.md)).
-Optical / read-only media can't carry a writable ext4 root, so the live ISO
-needs gnoboot to load `\boot\initramfs.cpio.gz` into an `AllocatePages` region
-and fill the pair, so the kernel (`core/initrd.cyr`, the RAM-disk reader) can
-run root from RAM. **Until this lands, the ISO cut is limited to the writable
-`.img` form** (iso-stage4-plan § N1a, which needs no gnoboot change). Slot:
-next feature release (~v0.5.0).
-
-**Riding along** (same release, same mechanism — read an ESP file / walk a
-firmware table → fill a reserved `boot_info` field): `cmdline_phys` (M2 cmdline
-half) + `acpi_rsdp_phys` (M3). Not ISO-gating, but identical "populate a
-reserved field" work, and the struct is already sized for them.
+**The remaining work is the cross-repo (agnos-side) consumer**, not gnoboot:
+the agnosticos **ISO Stage-4 read-only live `.iso` path**
+([`iso-stage4-plan.md` § N1b](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iso-stage4-plan.md))
+needs the kernel to *read* `initramfs_phys`/`size` and run root from RAM — today
+`core/initrd.cyr` mounts a synthetic INDR image from a fixed `0x6000` and ignores
+the field. The **initramfs format is the open contract**: gnoboot is deliberately
+format-neutral (`\boot\initramfs`, raw bytes), and the kernel's sovereign INDR
+format — not Linux `cpio.gz` — is the AGNOS-native direction. **The writable
+`.img` ISO form needs none of this** (iso-stage4-plan § N1a). `cmdline_phys` +
+`acpi_rsdp_phys` also await kernel-side readers (cmdline parser; an ACPI
+`boot_info` fallback ahead of the legacy BIOS probe).
 
 ## Milestones — v0.x → v1.0
 
@@ -84,37 +79,59 @@ Closes the only outstanding v0.1.0 validation. No new gnoboot
 features; this is a confidence cut. Whatever the iron run surfaces
 (if anything) drives v0.2.x patches.
 
-### M2 — cmdline + initramfs — ⚠ SLIPPED; initramfs half is now **P1** (see *Immediate priority* above)
+### v0.5.0 — boot_info feature-fill (initramfs + cmdline + ACPI RSDP) — ✅ shipped 2026-06-03
 
-Two adjacent fills of `boot_info` fields that are currently 0 (the planned
-v0.3.0 slot shipped GOP capture instead):
+> Consolidated the slipped M2/M3 fills into one release. All three use the same
+> mechanism — read an ESP file or walk a firmware table, then populate a reserved
+> `boot_info` field that previously passed **0**. The struct was already sized for
+> them (v2, `0x78`); **no ABI bump, no struct-version change**. All three are
+> OPTIONAL + benign-on-failure, so a normal boot is byte-for-byte unaffected.
+> Also advanced the cyrius pin `6.0.14` → `6.0.47`.
 
-- **`cmdline_phys`** — read kernel command line from ESP file
-  `\boot\cmdline` (NUL-terminated UTF-8); AllocatePages a page,
-  copy contents, set `boot_info->cmdline_phys`.
-- **`initramfs_phys` / `initramfs_size`** — read initramfs from
-  `\boot\initramfs.cpio.gz` (or wherever AGNOS conventions land)
-  into AllocatePages region, set the pair.
+Shipped:
 
-agnos kernel reads these (post-1.30.x agnos work). MVP for full
-userland boot.
+1. **`initramfs_phys` / `initramfs_size` (0x10/0x18) — the ISO live-`.iso` gate.**
+   Loads `\boot\initramfs` from the ESP into an `EfiLoaderData` region
+   (`GetInfo` → `AllocateAnyPages` → `Read`) and sets the pair. **The path is
+   format-NEUTRAL** (`\boot\initramfs`, no extension): gnoboot loads raw bytes and
+   reports phys+size; the kernel owns the format. The earlier `\boot\initramfs.cpio.gz`
+   plan was dropped — `cpio.gz` is a Linux-ism, and the kernel reads a sovereign
+   INDR blob, not gzipped cpio (per the kernel-grows-per-native-workload principle).
+   Keeping the format out of the gnoboot-visible name lets it evolve without
+   re-cutting the loader.
+2. **`cmdline_phys` (0x20).** Loads `\boot\cmdline` (NUL-terminated UTF-8) into an
+   `EfiLoaderData` page. Optional; forward-compat (no kernel consumer yet).
+3. **`acpi_rsdp_phys` (0x38).** Walks `SystemTable->ConfigurationTable`, prefers
+   the ACPI 2.0 GUID and falls back to 1.0, and stores the matching `VendorTable`
+   (the RSDP). Unblocks ACPI under UEFI, where the kernel's legacy BIOS probe
+   finds nothing.
 
-### M3 — v0.4.0 — ACPI RSDP + EFI Configuration Table walk
+**Verified**: OVMF smoke (fills run, boot reaches handoff unchanged; OVMF RSDP
+captured, absent files benign-`0`), EFI `ud2` scan clean, and a multi-lens
+adversarial review (GUIDs/offsets/ABI re-derived + confirmed; three robustness
+caps folded in). **Cross-repo follow-on (agnos-side)**: the kernel doesn't read
+these yet (`core/initrd.cyr` mounts a synthetic INDR image from `0x6000`; no
+cmdline parser; legacy-only ACPI). Wiring the kernel + settling the initramfs
+format end-to-end is the next step; iron re-verify of the filled fields rides the
+next agnos burn.
 
-Set `boot_info->acpi_rsdp_phys` from UEFI's `SystemTable->ConfigurationTable`
-search (find the `EFI_ACPI_TABLE_GUID` entry, copy the pointer).
-agnos already has `acpi_init()`; today it falls back to legacy
-BIOS probe (won't find anything under UEFI). Fixing this unblocks
-ACPI hardware enumeration on iron without depending on the legacy
-search path.
+### M2 — cmdline + initramfs — ✅ ABSORBED into v0.5.0 above
 
-### M4 — v0.5.0 — handoff-protocol v1 spec doc
+> Historical M-number. The cmdline + initramfs fills are now the v0.5.0 scope
+> (items 1–2). Kept for milestone-numbering continuity.
+
+### M3 — ACPI RSDP + EFI Configuration Table walk — ✅ ABSORBED into v0.5.0 above
+
+> Historical M-number. Now v0.5.0 item 3. Kept for continuity.
+
+### M4 — handoff-protocol v1 spec doc
 
 `docs/standards/handoff-protocol.md` written as the authoritative
 spec. Every field documented; every reserved tag-type slot listed;
 versioning rules + forward-compat rules pinned. **Hardens the contract
-for v1.0.** Should be drafted before v0.5 ships (so v0.5 → v0.6 is the
-test of "does the spec match the code").
+for v1.0.** Re-slots to **~v0.6.0** now that v0.5.0 is the boot_info
+feature-fill; should be drafted once the v0.5.0 fills settle the field
+layout (so the spec documents the as-shipped struct, not a moving target).
 
 ### M5 — v0.6.0 — multi-PT_LOAD support
 

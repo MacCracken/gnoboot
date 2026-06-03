@@ -3,45 +3,63 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality — initramfs `boot_info`-fill flagged **P1** as the ISO live-`.iso` gate; the iron-validation, scheduler-stall, and boot_info-deref items closed/corrected). Prior: 2026-05-28 (v0.4.3 — cyrius toolchain pin bump to 6.0.14).
+> **Last refresh**: 2026-06-03 (**v0.5.0 cut** — the boot_info feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` now populated pre-EBS, all optional + benign-on-failure; `cyrius.cyml` pin `6.0.14` → `6.0.47`. Multi-lens adversarial review confirmed GUIDs/offsets/ABI and added three robustness caps. Build + structural + OVMF gates green; awaiting user tag). Prior: 2026-06-03 earlier (pin-only `6.0.14` → `6.0.47`, no cut). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality — initramfs `boot_info`-fill flagged **P1**). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.4.3** — released 2026-05-28. Toolchain-pin release: advances the
-`cyrius.cyml` pin from `6.0.1` to `6.0.14` (clears manifest-vs-wrapper
-drift). No ABI change; boot_info struct version `2`, magic `'AGNO'`,
-struct_size `0x78` unchanged since 0.4.0. The 0.4.2 SetMode-bounce code
-is retained as-is — the gnoboot-side GOP `SetMode` lever for the AMD-Zen
-Quiet-Boot scanout residue is exhausted (see CHANGELOG [Unreleased]
-signpost; next channel is kernel-side).
+**0.5.0** — cut 2026-06-03 (awaiting user tag). The **boot_info
+feature-fill** release: three reserved fields that passed `0` since
+v0.1.0 are now populated pre-ExitBootServices, all OPTIONAL +
+benign-on-failure (a normal boot with no extra ESP files is byte-for-byte
+unaffected). **No ABI change** — struct version `2`, magic `'AGNO'`,
+struct_size `0x78` unchanged; these offsets were reserved since v0.1.0.
+- `initramfs_phys` (0x10) / `initramfs_size` (0x18) ← `\boot\initramfs`
+  (format-NEUTRAL path; kernel owns the format, sovereign INDR not Linux
+  cpio.gz). The ISO live-`.iso` RAM-root gate.
+- `cmdline_phys` (0x20) ← `\boot\cmdline` (forward-compat; no consumer yet).
+- `acpi_rsdp_phys` (0x38) ← EFI Configuration Table walk (ACPI 2.0 GUID
+  preferred, 1.0 fallback). Unblocks ACPI under UEFI.
+Also bumps the `cyrius.cyml` pin to `6.0.47`. The 0.4.2 SetMode-bounce
+code is retained as-is (AMD-Zen scanout residue is kernel-side; see
+CHANGELOG [Unreleased] signpost).
 
 ## Toolchain
 
-- **Cyrius pin**: `6.0.14` (in `cyrius.cyml [package].cyrius`)
+- **Cyrius pin**: `6.0.47` (in `cyrius.cyml [package].cyrius`) — advanced from
+  `6.0.14` at the v0.5.0 cut. Builds clean, structural gate PASS, no `ud2 ud2`.
+  (Build host has since drifted to cycc 6.0.48; pin held at 6.0.47 per the
+  user's explicit choice — known-good, not chased.)
 - Required cyrius features:
     - 5.11.49 — `_TARGET_EFI_APPLICATION` PE32+ EFI emit mode
     - 5.11.51 — byte-array literal `var foo[N] = { 0x.., 0x.., ... };`
     - 5.11.52 — `fn efi_main(handle, st)` auto-trampoline + lib/fnptr.cyr
       TARGET_WIN branches under TARGET_EFI
     - 5.11.53 — entry-save REX prefix hotfix (gnoboot agent filed)
+    - 6.0.46 — `CYRIUS_TARGET_EFI ⇒ CYRIUS_TARGET_WIN` predefine implication
+      restored (the v6.0.0 regression that emitted `ud2 ud2` at every `fncallN`
+      site under EFI), locked behind two check.sh gates (`efi_fncall_probe.cyr`
+      + `_efi_emit_gate` PE byte-scan). Issue archived cyrius-side.
 
 ## Binary
 
-- **`build/BOOTX64.EFI`**: ~33 KB (PE32+ EFI Application, x86_64,
+- **`build/BOOTX64.EFI`**: ~39 KB (PE32+ EFI Application, x86_64,
   subsystem 0x000A, NX_COMPAT + DYNAMIC_BASE + HIGH_ENTROPY_VA,
   `.reloc` populated). Bulk is the cyrius `fncallN` MS-x64-ABI
-  trampolines from `lib/fnptr.cyr`; gnoboot's own code is ~1.5 KB.
+  trampolines from `lib/fnptr.cyr`; gnoboot's own code is ~2 KB
+  (grew ~6 KB at v0.5.0 for the three optional fills + helpers).
 - **Entry**: cyrius e9 jmp prologue at `.text+0`, jumps to auto-trampoline
   that captures `RCX → R14`, `RDX → R15`, then `call efi_main` (MS x64 ABI)
 
 ## Source
 
-- `src/main.cyr` — single file, ~375 lines. UTF-16LE message constants
+- `src/main.cyr` — single file, ~560 lines. UTF-16LE message constants
   (one `msg_pre` banner + one shared `msg_fail` template + 13
   per-stage `code_*` codes), EFI GUIDs (LoadedImage + SimpleFileSystem
-  + GraphicsOutput), helpers `efi_print` / `efi_clear` / `efi_fail`,
-  entry `fn efi_main(handle, st)`. Entry trampoline auto-emitted by
-  cyrius.
+  + GraphicsOutput + v0.5.0: FileInfo + ACPI 2.0/1.0), helpers
+  `efi_print` / `efi_clear` / `efi_fail` + v0.5.0 `load_esp_blob` /
+  `guid_eq`, entry `fn efi_main(handle, st)`. The v0.5.0 fills live in
+  the `10d-f` block of `efi_main` (between GOP capture and the
+  GetMemoryMap pair). Entry trampoline auto-emitted by cyrius.
 
 ## Tests
 
@@ -67,9 +85,9 @@ signpost; next channel is kernel-side).
 
 Direct (declared in `cyrius.cyml`):
 
-- stdlib — `lib/fnptr.cyr` (`fncall2`, `fncall3`, `fncall5` for MS x64
-  firmware-call dispatch). No other stdlib deps; UEFI Application is
-  freestanding.
+- stdlib — `lib/fnptr.cyr` (`fncall1`–`fncall5` for MS x64 firmware-call
+  dispatch; v0.5.0 added `fncall4` use for `GetInfo`/`AllocatePages`).
+  No other stdlib deps; UEFI Application is freestanding.
 
 ## Consumers
 
@@ -87,17 +105,28 @@ Direct (declared in `cyrius.cyml`):
   archaemenid (Zen) across the agnos 1.40.x exec-from-disk arc (the
   `14013_final*` burn, 2026-05-31): UEFI → gnoboot → agnos boots clean through
   `Activating scheduler` → `Launching kybernet`.
+- **v0.5.0 boot_info fills** (QEMU OVMF, 2026-06-03): the three pre-EBS
+  fills run and the boot reaches handoff unchanged — OVMF's RSDP captured
+  into `acpi_rsdp_phys` (0x38); absent `\boot\initramfs` + `\boot\cmdline`
+  leave their fields `0` (benign). EFI `ud2` scan clean; GUIDs/offsets/ABI
+  independently re-derived + confirmed by adversarial review. **Iron
+  re-validation of the filled fields rides the next agnos burn** (and is
+  only meaningful once the kernel reads them — see Open).
 
 ## Open
 
-- **`initramfs_phys` / `initramfs_size` fill — P1 (ISO live-`.iso` gate).**
-  gnoboot reserves these fields (struct v2, offsets `0x10`/`0x18`) but passes
-  **0** (MVP). The agnosticos read-only live `.iso` path needs gnoboot to load
-  `\boot\initramfs.cpio.gz` into an `AllocatePages` region and fill the pair so
-  the kernel (`core/initrd.cyr`) runs root from RAM. See
-  [`roadmap.md` § Immediate priority](roadmap.md) + agnosticos
-  `iso-stage4-plan.md` § N1b. **The writable `.img` ISO cut needs none of this.**
-  `cmdline_phys` (M2 cmdline half) + `acpi_rsdp_phys` (M3) ride the same release.
+- **boot_info feature-fill — LANDED at v0.5.0 (gnoboot side).** gnoboot now
+  fills `initramfs_phys`/`size` (0x10/0x18) from `\boot\initramfs`,
+  `cmdline_phys` (0x20) from `\boot\cmdline`, and `acpi_rsdp_phys` (0x38)
+  from the EFI Configuration Table — all optional + benign-on-failure. The
+  **cross-repo follow-on is agnos-side**: the kernel does not yet read any
+  of these (`core/initrd.cyr` mounts a synthetic INDR image from a fixed
+  `0x6000`; no cmdline parser; `acpi_init` only does the legacy BIOS scan).
+  Wiring the kernel to read `boot_info`, and settling the **initramfs
+  format end-to-end** (gnoboot is deliberately format-neutral — sovereign
+  INDR, not Linux cpio.gz), is the next step. Tracks the agnosticos
+  read-only live-`.iso` path ([`iso-stage4-plan.md` § N1b]) — **the
+  writable `.img` ISO cut needs none of it.** See [`roadmap.md` § v0.5.0].
 - **Kernel now reads the inlined FB fields** (`fb_phys`/`pitch`/`width`/`height`)
   — supersedes the old "kernel stashes the pointer but doesn't dereference
   fields" note; the agnos 1.40.9 `boot_info_copy` fix reads them (it was the

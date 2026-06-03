@@ -21,15 +21,15 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot v0.4.3: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# "gnoboot v0.5.0: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
 # Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
 # release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
 # default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
 var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
-    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x34,0x00,    # 'v0.4'
-    0x2E,0x00, 0x33,0x00, 0x3A,0x00, 0x20,0x00,    # '.3: '
+    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x35,0x00,    # 'v0.5'
+    0x2E,0x00, 0x30,0x00, 0x3A,0x00, 0x20,0x00,    # '.0: '
     0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
     0x6F,0x00, 0x66,0x00, 0x66,0x00, 0x20,0x00,    # 'off '
@@ -76,6 +76,35 @@ var path[3] = {
     0x61,0x00, 0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x73,0x00
 };
 
+# Path: UTF-16LE "\boot\initramfs\0" — 16 CHAR16 = 32 bytes; N=4.
+# Format-NEUTRAL by design: gnoboot loads raw bytes and reports phys+size;
+# the kernel owns the initramfs format (sovereign INDR today — NOT a Linux
+# cpio.gz, per the kernel-grows-per-native-workload principle). Keeping the
+# format out of the gnoboot-visible name lets it evolve without re-cutting
+# the loader. Optional: absent → initramfs_phys/size stay 0, boot proceeds
+# (writable .img boots carry no initramfs). See agnosticos roadmap v0.5.0 +
+# iso-stage4-plan § N1b.
+var path_initramfs[4] = {
+    0x5C,0x00,
+    0x62,0x00, 0x6F,0x00, 0x6F,0x00, 0x74,0x00,
+    0x5C,0x00,
+    0x69,0x00, 0x6E,0x00, 0x69,0x00, 0x74,0x00, 0x72,0x00,
+    0x61,0x00, 0x6D,0x00, 0x66,0x00, 0x73,0x00,
+    0x00,0x00
+};
+
+# Path: UTF-16LE "\boot\cmdline\0" — 14 CHAR16 = 28 bytes; N=4 (pad to 32).
+# Optional ESP file (NUL-terminated UTF-8 kernel cmdline). Absent →
+# cmdline_phys stays 0 (forward-compat: no kernel consumer yet).
+var path_cmdline[4] = {
+    0x5C,0x00,
+    0x62,0x00, 0x6F,0x00, 0x6F,0x00, 0x74,0x00,
+    0x5C,0x00,
+    0x63,0x00, 0x6D,0x00, 0x64,0x00, 0x6C,0x00, 0x69,0x00, 0x6E,0x00, 0x65,0x00,
+    0x00,0x00,
+    0x00,0x00, 0x00,0x00
+};
+
 # === Protocol GUIDs ======================================================
 
 var li_guid[2] = {
@@ -97,6 +126,28 @@ var gop_guid[2] = {
     0x96,0xFB,0x7A,0xDE,0xD0,0x80,0x51,0x6A
 };
 
+# EFI_FILE_INFO_ID = 09576e92-6d3f-11d2-8e39-00a0c969723b. Passed to
+# EFI_FILE_PROTOCOL.GetInfo (file+0x40) to read FileSize (u64) at
+# EFI_FILE_INFO+0x08 before AllocatePages — used by load_esp_blob to
+# size the optional initramfs / cmdline reads (v0.5.0).
+var file_info_guid[2] = {
+    0x92,0x6E,0x57,0x09, 0x3F,0x6D, 0xD2,0x11,
+    0x8E,0x39,0x00,0xA0,0xC9,0x69,0x72,0x3B
+};
+
+# EFI_ACPI_20_TABLE_GUID = 8868e871-e4f1-11d3-bc22-0080c73c8881 (preferred).
+# EFI_ACPI_TABLE_GUID (1.0) = eb9d2d30-2d88-11d3-9a16-0090273fc14d (fallback).
+# Matched against each EFI_CONFIGURATION_TABLE.VendorGuid; VendorTable IS
+# the RSDP physical address → boot_info->acpi_rsdp_phys (v0.5.0).
+var acpi20_guid[2] = {
+    0x71,0xE8,0x68,0x88, 0xF1,0xE4, 0xD3,0x11,
+    0xBC,0x22,0x00,0x80,0xC7,0x3C,0x88,0x81
+};
+var acpi10_guid[2] = {
+    0x30,0x2D,0x9D,0xEB, 0x88,0x2D, 0xD3,0x11,
+    0x9A,0x16,0x00,0x90,0x27,0x3F,0xC1,0x4D
+};
+
 # === Sovereign boot-info struct ==========================================
 # Layout per agnosticos/docs/development/path-c-sovereign-uefi.md § Handoff.
 # 120 bytes total (112 inlined fields + 8-byte END tag).
@@ -112,13 +163,13 @@ var gop_guid[2] = {
 #   0x04  u32   version          = 2 (bumped: inlined fb fields)
 #   0x08  u32   struct_size      = 120 (0x78)
 #   0x0C  u32   flags            (bit 0=serial, bit 1=fb_present)
-#   0x10  u64   initramfs_phys   (filled at runtime or 0 for MVP)
-#   0x18  u64   initramfs_size
-#   0x20  u64   cmdline_phys
+#   0x10  u64   initramfs_phys   (v0.5.0: \boot\initramfs base; 0 if absent)
+#   0x18  u64   initramfs_size   (v0.5.0: initramfs byte count; 0 if absent)
+#   0x20  u64   cmdline_phys     (v0.5.0: \boot\cmdline base; 0 if absent)
 #   0x28  u64   memmap_phys      (filled at runtime: &mm_buf)
 #   0x30  u32   memmap_count     (filled at runtime: mm_size / mm_dsz)
 #   0x34  u32   memmap_entsize   (filled at runtime: mm_dsz)
-#   0x38  u64   acpi_rsdp_phys   (0 for MVP; kernel doesn't read yet)
+#   0x38  u64   acpi_rsdp_phys   (v0.5.0: RSDP from EFI cfg table; 0 if absent)
 #   0x40  u64   efi_st_phys      (filled at runtime: SystemTable*)
 #   0x48  u64   fb_phys          (filled if GOP located; 0 = no fb)
 #   0x50  u32   fb_pitch         (bytes per scanline = ppl * 4)
@@ -177,6 +228,21 @@ var mm_key[1];
 var mm_dsz[1];
 var mm_dver[1];
 
+# --- v0.5.0 optional-fill scratch (initramfs / cmdline blob loader) ------
+# module-global so the [N] = N*u64 unit applies: finfo[32] = 256 bytes.
+var blob_file_out[1];     # EFI_FILE_PROTOCOL* handle for the opened blob
+var finfo[32];            # EFI_FILE_INFO scratch (256 B; FileSize @ +0x08)
+var finfo_sz[1];          # GetInfo BufferSize in/out
+var blob_addr[1];         # AllocatePages address in/out
+var blob_rdsz[1];         # Read BufferSize in/out
+var initramfs_size_v[1];  # receives initramfs byte count
+var cmdline_size_v[1];    # receives cmdline byte count (size unused, phys only)
+# efi_main stashes these so load_esp_blob stays a 2-param helper (matches
+# the efi_print/efi_clear/efi_fail convention — no >2-param fn in this file).
+var g_root[1];            # OpenVolume root EFI_FILE_PROTOCOL*
+var g_fn_open[1];         # root->Open fn ptr
+var g_fn_alloc[1];        # BootServices->AllocatePages fn ptr
+
 
 # === Helpers ============================================================
 
@@ -204,6 +270,84 @@ fn efi_fail(st, code): i64 {
     store64(&msg_fail + 32, load64(code));
     efi_print(st, &msg_fail);
     return 0;
+}
+
+# Load an OPTIONAL ESP file into a fresh EfiLoaderData region and report
+# its byte length through size_out. Returns the physical base on success,
+# or 0 on ANY failure (file absent, GetInfo / AllocatePages / Read error)
+# — the caller then leaves the matching boot_info field at 0, exactly like
+# the GOP-absent path. Optional-and-benign is MANDATORY: a normal AGNOS
+# boot (writable .img with no initramfs / cmdline on the ESP) must not
+# regress, so this never calls efi_fail / aborts.
+#
+# Reads g_root / g_fn_open / g_fn_alloc (stashed by efi_main) to stay a
+# 2-param fn, matching this file's helper convention.
+#   EFI_FILE_PROTOCOL: Read @ +0x20, SetPosition @ +0x38, GetInfo @ +0x40.
+#   EFI_FILE_INFO:     FileSize (u64) @ +0x08.
+#   AllocatePages:     AllocateAnyPages=0, EfiLoaderData=2 (pure data,
+#                      never executed → NX-safe; survives ExitBootServices
+#                      per UEFI 2.10 §2.3.2; convergent with systemd-boot /
+#                      GRUB-EFI / Limine initrd allocation).
+# Runs pre-EBS and BEFORE the Step-11/12 GetMemoryMap pair, so the blob's
+# EfiLoaderData region appears in the memory map the kernel inherits.
+fn load_esp_blob(path_ptr, size_out): i64 {
+    store64(size_out, 0);
+
+    var rt  = load64(&g_root);
+    var fno = load64(&g_fn_open);
+    var rc  = fncall5(fno, rt, &blob_file_out, path_ptr, 1, 0);
+    if (rc != 0) { return 0; }                       # absent → benign
+    var fh  = load64(&blob_file_out);
+    var fn_gi  = load64(fh + 0x40);                  # GetInfo
+    var fn_brd = load64(fh + 0x20);                  # Read
+    var fn_bsp = load64(fh + 0x38);                  # SetPosition
+
+    store64(&finfo_sz, 256);
+    rc = fncall4(fn_gi, fh, &file_info_guid, &finfo_sz, &finfo);
+    if (rc != 0) { return 0; }
+    var fsize = load64(&finfo + 0x08);
+    if (fsize == 0) { return 0; }                    # empty → nothing to load
+    # Sanity cap (1 GiB): FileSize is an unchecked firmware u64. Without
+    # this, a pathological size overflows `(fsize + 0xFFF) / 0x1000` → a
+    # tiny page count → AllocatePages under-allocates → the Read below
+    # overruns. A boot-stage blob is never this large; reject benignly.
+    if (fsize > 0x40000000) { return 0; }
+
+    var bpages = (fsize + 0xFFF) / 0x1000;
+    var fal = load64(&g_fn_alloc);
+    store64(&blob_addr, 0);
+    rc = fncall4(fal, 0, 2, bpages, &blob_addr);     # AnyPages, LoaderData
+    if (rc != 0) { return 0; }
+    var base = load64(&blob_addr);
+
+    rc = fncall2(fn_bsp, fh, 0);                      # rewind to start
+    if (rc != 0) { return 0; }
+    store64(&blob_rdsz, fsize);
+    rc = fncall3(fn_brd, fh, &blob_rdsz, base);
+    if (rc != 0) { return 0; }
+    # EFI_FILE_PROTOCOL.Read may short-read on success (UEFI 2.10 §13.5.1:
+    # it rewrites BufferSize to bytes-actually-transferred). A partial read
+    # would hand the kernel an inflated size over a truncated buffer — fail
+    # benignly instead (the optional field stays 0). The pre-existing kernel
+    # ELF load assumes a full read too, but it's iron-proven on this FAT/ESP
+    # path; the guard makes the new optional path strictly safe.
+    if (load64(&blob_rdsz) < fsize) { return 0; }
+
+    # NOTE: the file handle (blob_file_out) is intentionally not Close()d —
+    # all Boot Services handles are reclaimed at ExitBootServices a few
+    # steps later, and the pre-existing \boot\agnos handle is likewise left
+    # open. Closing here would buy nothing pre-EBS.
+    store64(size_out, fsize);
+    return base;
+}
+
+# Compare two 16-byte EFI_GUIDs (two u64 lanes). Returns 1 if equal, else
+# 0. Byte order is irrelevant to equality — both operands are stored in
+# the same in-memory GUID layout, so a lane-wise u64 compare is exact.
+fn guid_eq(a, b): i64 {
+    if (load64(a + 0) != load64(b + 0)) { return 0; }
+    if (load64(a + 8) != load64(b + 8)) { return 0; }
+    return 1;
 }
 
 
@@ -372,6 +516,62 @@ fn efi_main(handle, st): i64 {
         store64(&boot_info + 0x68, fb_size);   # FrameBufferSize
         store32(&boot_info + 0x0C, 0x02);      # flags.fb_present = 1
     }
+
+    # --- 10d-f: Optional boot_info feature-fills (v0.5.0) --------------
+    # All OPTIONAL + benign-on-failure (GOP-style): a missing ESP file or
+    # absent ACPI table leaves the field 0 and the boot proceeds. They run
+    # pre-EBS (file I/O + AllocatePages are Boot Services) and BEFORE the
+    # Step-11/12 GetMemoryMap pair, so blob allocations land in the memory
+    # map the kernel inherits. Stash root / Open / AllocatePages for the
+    # 2-param load_esp_blob helper.
+    store64(&g_root,     root);
+    store64(&g_fn_open,  fn_open);
+    store64(&g_fn_alloc, fn_alloc);
+
+    # 10d: initramfs (P1 — ISO live-.iso gate). \boot\initramfs (format-
+    #      neutral) → EfiLoaderData region; fill initramfs_phys (0x10) +
+    #      size (0x18).
+    #      gnoboot deliberately leads its consumer: the kernel reader
+    #      (agnos core/initrd.cyr) currently mounts a synthetic INDR image
+    #      from a fixed 0x6000 and does not yet read these fields — wiring
+    #      that (and the cpio.gz-vs-INDR format contract) is a separate
+    #      agnos-side follow-on. gnoboot's job here is faithful load+report.
+    var ird = load_esp_blob(&path_initramfs, &initramfs_size_v);
+    if (ird != 0) {
+        store64(&boot_info + 0x10, ird);
+        store64(&boot_info + 0x18, load64(&initramfs_size_v));
+    }
+
+    # 10e: kernel cmdline. \boot\cmdline (NUL-terminated UTF-8) →
+    #      EfiLoaderData page; fill cmdline_phys (0x20). No kernel consumer
+    #      yet — forward-compat field; loaded faithfully, NUL-termination
+    #      is the build's responsibility (roadmap convention).
+    var cmd = load_esp_blob(&path_cmdline, &cmdline_size_v);
+    if (cmd != 0) {
+        store64(&boot_info + 0x20, cmd);
+    }
+
+    # 10f: ACPI RSDP from the EFI Configuration Table (pure SystemTable
+    #      reads — no Boot Service, so map-key-safe). ST->NumberOfTableEntries
+    #      @ st+0x68, ST->ConfigurationTable @ st+0x70; each entry is
+    #      {EFI_GUID[16], VendorTable[8]} = 24 B. Prefer the ACPI 2.0 GUID,
+    #      fall back to 1.0; VendorTable IS the RSDP physical address →
+    #      fill acpi_rsdp_phys (0x38). Unblocks ACPI under UEFI, where the
+    #      kernel's legacy EBDA / 0xE0000 ROM scan finds nothing.
+    var nents  = load64(st + 0x68);
+    var ctab   = load64(st + 0x70);
+    if (nents > 256) { nents = 256; }                # bound a malformed count
+    var rsdp   = 0;
+    var rsdp10 = 0;
+    var ti = 0;
+    while (ti < nents) {
+        var ent = ctab + ti * 24;
+        if (guid_eq(ent, &acpi20_guid) != 0) { rsdp   = load64(ent + 16); }
+        if (guid_eq(ent, &acpi10_guid) != 0) { rsdp10 = load64(ent + 16); }
+        ti = ti + 1;
+    }
+    if (rsdp == 0) { rsdp = rsdp10; }                # no 2.0 → use 1.0
+    if (rsdp != 0) { store64(&boot_info + 0x38, rsdp); }
 
     # --- 11: Initial GetMemoryMap (informational; just to size the buffer) ---
     store64(&mm_size, 16384);

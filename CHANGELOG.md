@@ -8,6 +8,84 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 > **Next-cycle signpost for the AMD-Zen Quiet-Boot scanout residue** (closed out at 0.4.2): the gnoboot-side GOP `SetMode` lever is exhausted on archaemenid. **Do NOT propose another SetMode variant** — both same-mode (0.4.1, Attempt 74) and different-mode bounce (0.4.2, Attempt 78) are firmware-elided on AMD Zen UEFI. Next channel for the bug is **kernel-side**, not gnoboot-side: either a minimal-redesign port of Linux's HUBP `clear_tiling` sequence (per amd-gfx ML; 3-6 MMIO writes per HUBP; DCN1→DCN3 register offsets inherited; Cezanne PCI BAR0 of `1002:1638`), OR an architectural decision about adopting shadow-buffer semantics for the AGNOS FB-console layer (simpledrm-style, per `archintel` Attempt 79 cross-check finding). Intel cross-check on archintel was structurally inconclusive (no BGRT table, hybrid Intel+NVIDIA GPU, Linux uses simpledrm). Older single-iGPU Intel box with BGRT-publishing firmware is the parked future discriminator. Full closeout record in `agnosticos/docs/development/iron-nuc-zen-log.md` § Attempt 79; memory pin: `project_amd_zen_scanout_residue`.
 
+## [0.5.0] — 2026-06-03
+
+The **boot_info feature-fill** release. Three reserved `boot_info` fields
+that have passed `0` since v0.1.0 are now populated from the ESP / firmware
+tables, pre-ExitBootServices. All three are **OPTIONAL + benign-on-failure**
+(GOP-style): a missing file or absent table leaves the field `0` and the
+boot proceeds unchanged — a normal AGNOS boot (writable `.img`, no extra ESP
+files) is byte-for-byte unaffected. No struct/ABI change.
+
+Advances the `cyrius.cyml` toolchain pin `6.0.14` → `6.0.47` (the first pin
+that both fixes *and* guards the `CYRIUS_TARGET_EFI` `ud2`-at-`fncallN` emit
+regression — cyrius v6.0.46). Builds clean; the EFI `ud2 ud2` byte-scan is
+clean; structural + OVMF gates green.
+
+### Added
+
+- **`initramfs_phys` (0x10) / `initramfs_size` (0x18)** — loads
+  `\boot\initramfs` from the ESP into a fresh `EfiLoaderData` region
+  (`GetInfo` → `AllocatePages(AllocateAnyPages, EfiLoaderData)` → `Read`)
+  and fills the pair. The upstream dependency for the agnosticos read-only
+  live-`.iso` path (RAM root). **Path is format-NEUTRAL by design**:
+  gnoboot loads raw bytes and reports phys+size; the kernel owns the
+  initramfs format (sovereign INDR today — *not* a Linux `cpio.gz`). The
+  earlier `\boot\initramfs.cpio.gz` plan was a Linux-ism that doesn't fit
+  AGNOS's kernel-grows-per-native-workload posture; the format is
+  deliberately kept out of the gnoboot-visible name so it can evolve
+  without re-cutting the loader.
+- **`cmdline_phys` (0x20)** — loads `\boot\cmdline` (NUL-terminated UTF-8)
+  into an `EfiLoaderData` page and fills the field. Forward-compat: no
+  kernel consumer yet.
+- **`acpi_rsdp_phys` (0x38)** — walks `SystemTable->ConfigurationTable`
+  (`st+0x68` count, `st+0x70` table, 24-byte entries), prefers the ACPI
+  2.0 GUID and falls back to 1.0, and stores the matching `VendorTable`
+  (the RSDP physical pointer). Unblocks ACPI under UEFI, where the kernel's
+  legacy EBDA / `0xE0000` ROM scan finds nothing.
+- Shared `load_esp_blob` (2-param, reads stashed root/Open/AllocatePages
+  globals) + `guid_eq` helpers. Hardening from the v0.5.0 adversarial
+  review: a 1 GiB `fsize` sanity cap (firmware `FileSize` is unchecked),
+  a short-read guard (UEFI `Read` may transfer fewer bytes on success),
+  and a 256-entry cap on the config-table walk.
+
+### Changed
+
+- **`cyrius.cyml` toolchain pin**: `6.0.14` → `6.0.47`.
+- **Banner**: `gnoboot v0.4.3: …` → `gnoboot v0.5.0: …` (`msg_pre`
+  UTF-16LE digits at char positions 11/13).
+- **`tests/ovmf_smoke.sh` default `EXPECT`**: matches the new banner.
+
+### Wire compatibility
+
+**No struct version bump.** boot_info magic `'AGNO'`, struct version `2`,
+struct_size `0x78`, and all field offsets are unchanged from 0.4.x — these
+fields were reserved at those offsets since v0.1.0; v0.5.0 just stops
+passing `0`. A kernel that doesn't read them is unaffected; a kernel that
+does sees real values when the corresponding ESP file / ACPI table exists.
+
+### Consumer status (cross-repo)
+
+gnoboot deliberately **leads its consumer**. As of agnos 1.40.x the kernel
+does **not** yet read these fields: `core/initrd.cyr` mounts a synthetic
+INDR image from a fixed `0x6000`, there is no cmdline parser, and
+`acpi_init()` only runs the legacy BIOS scan. Wiring the kernel to read
+`boot_info` (and settling the initramfs format end-to-end) is a separate
+agnos-side follow-on; this release makes the data available at the contract.
+
+### Verified
+
+- `tests/verify_pe.sh` PASS — PE32+ EFI Application, Subsystem `0x000A`,
+  NX_COMPAT, no RELOCS_STRIPPED.
+- `tests/ovmf_smoke.sh` PASS — `"gnoboot v0.5.0: handing off to kernel"`
+  observed on ConOut under qemu + OVMF; the new pre-EBS fills run (OVMF
+  RSDP captured into `0x38`; absent initramfs/cmdline → benign `0`) and
+  the boot reaches handoff unchanged.
+- EFI `ud2 ud2` byte-scan clean (cyrius v6.0.46 guard).
+- Adversarial multi-lens review: GUID byte-order, struct offsets, and
+  MS-x64 `fncallN` arities all independently re-derived and confirmed;
+  the only findings were the robustness caps now folded in.
+
 ## [0.4.3] — 2026-05-28
 
 Toolchain-pin release. Advances the `cyrius.cyml [package].cyrius` pin from
