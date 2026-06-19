@@ -20,10 +20,12 @@ structural + OVMF gates green (banner now reads `gnoboot v0.5.1`).
 ### Changed
 
 - **`cyrius.cyml` toolchain pin `6.0.47` → `6.2.24`** — the gnoboot
-  banner/source builds clean under the 6.2.x series. Pin held at `6.2.24`
-  (known-good) rather than chasing the build host's 6.2.25 wrapper, per
-  the project's pin-discipline (pin is the source of truth, not the
-  installed wrapper).
+  banner/source builds clean under the 6.2.x series. `6.2.24` is the
+  latest *released* cyrius; the build host's wrapper has drifted to a
+  `6.2.25` snapshot that is **not yet fully released**, so the pin is held
+  at `6.2.24` (the toolchain CI and consumers can actually install). The
+  build emits a benign pin-drift warning against the local `6.2.25`
+  wrapper — expected, and the pin is the source of truth.
 - **Banner version string `v0.5.0` → `v0.5.1`** (`msg_pre` in
   `src/main.cyr`) and the `ovmf_smoke.sh` default `EXPECT` synced to match.
 

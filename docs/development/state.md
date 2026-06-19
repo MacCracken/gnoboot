@@ -32,9 +32,11 @@ boot with no extra ESP files is byte-for-byte unaffected). No ABI change.
 
 - **Cyrius pin**: `6.2.24` (in `cyrius.cyml [package].cyrius`) — advanced from
   `6.0.47` at the v0.5.1 cut. Builds clean, structural gate PASS, no `ud2 ud2`.
-  (Build host wrapper is cycc 6.2.25; pin held at 6.2.24 per the user's
-  explicit choice — known-good, not chased. The build emits a benign
-  pin-drift warning; the pin is the source of truth, not the wrapper.)
+  (`6.2.24` is the latest *released* cyrius. Build host wrapper has drifted
+  to a `6.2.25` snapshot that is **not yet fully released**, so the pin is
+  held at 6.2.24 — the version CI and consumers can actually install, not
+  the local pre-release. The build emits a benign pin-drift warning against
+  the local wrapper; the pin is the source of truth, not the wrapper.)
 - Required cyrius features:
     - 5.11.49 — `_TARGET_EFI_APPLICATION` PE32+ EFI emit mode
     - 5.11.51 — byte-array literal `var foo[N] = { 0x.., 0x.., ... };`
