@@ -8,6 +8,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 > **Next-cycle signpost for the AMD-Zen Quiet-Boot scanout residue** (closed out at 0.4.2): the gnoboot-side GOP `SetMode` lever is exhausted on archaemenid. **Do NOT propose another SetMode variant** — both same-mode (0.4.1, Attempt 74) and different-mode bounce (0.4.2, Attempt 78) are firmware-elided on AMD Zen UEFI. Next channel for the bug is **kernel-side**, not gnoboot-side: either a minimal-redesign port of Linux's HUBP `clear_tiling` sequence (per amd-gfx ML; 3-6 MMIO writes per HUBP; DCN1→DCN3 register offsets inherited; Cezanne PCI BAR0 of `1002:1638`), OR an architectural decision about adopting shadow-buffer semantics for the AGNOS FB-console layer (simpledrm-style, per `archintel` Attempt 79 cross-check finding). Intel cross-check on archintel was structurally inconclusive (no BGRT table, hybrid Intel+NVIDIA GPU, Linux uses simpledrm). Older single-iGPU Intel box with BGRT-publishing firmware is the parked future discriminator. Full closeout record in `agnosticos/docs/development/iron-nuc-zen-log.md` § Attempt 79; memory pin: `project_amd_zen_scanout_residue`.
 
+## [0.5.1] — 2026-06-19
+
+Toolchain pin-bump patch release. Advances the `cyrius.cyml` pin
+`6.0.47` → `6.2.24` and bumps the banner version string. **No source
+behavior change** beyond the banner — the boot path, handoff contract
+(magic `'AGNO'`, struct version `2`, `struct_size 0x78`), and ABI are
+byte-for-byte identical to v0.5.0. Builds clean on the 6.2.x toolchain;
+structural + OVMF gates green (banner now reads `gnoboot v0.5.1`).
+
+### Changed
+
+- **`cyrius.cyml` toolchain pin `6.0.47` → `6.2.24`** — the gnoboot
+  banner/source builds clean under the 6.2.x series. Pin held at `6.2.24`
+  (known-good) rather than chasing the build host's 6.2.25 wrapper, per
+  the project's pin-discipline (pin is the source of truth, not the
+  installed wrapper).
+- **Banner version string `v0.5.0` → `v0.5.1`** (`msg_pre` in
+  `src/main.cyr`) and the `ovmf_smoke.sh` default `EXPECT` synced to match.
+
 ## [0.5.0] — 2026-06-03
 
 The **boot_info feature-fill** release. Three reserved `boot_info` fields

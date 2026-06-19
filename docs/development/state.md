@@ -3,32 +3,38 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-06-03 (**v0.5.0 cut** — the boot_info feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` now populated pre-EBS, all optional + benign-on-failure; `cyrius.cyml` pin `6.0.14` → `6.0.47`. Multi-lens adversarial review confirmed GUIDs/offsets/ABI and added three robustness caps. Build + structural + OVMF gates green; awaiting user tag). Prior: 2026-06-03 earlier (pin-only `6.0.14` → `6.0.47`, no cut). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality — initramfs `boot_info`-fill flagged **P1**). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
+> **Last refresh**: 2026-06-19 (**v0.5.1 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.0.47` → `6.2.24`, banner version string `v0.5.0` → `v0.5.1`. No source behavior change beyond the banner; handoff contract + ABI byte-for-byte identical to v0.5.0. Builds clean on 6.2.x; structural + OVMF gates green; awaiting user tag). Prior: 2026-06-03 (**v0.5.0 cut** — the boot_info feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` now populated pre-EBS, all optional + benign-on-failure; `cyrius.cyml` pin `6.0.14` → `6.0.47`. Multi-lens adversarial review confirmed GUIDs/offsets/ABI and added three robustness caps). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality — initramfs `boot_info`-fill flagged **P1**). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.5.0** — cut 2026-06-03 (awaiting user tag). The **boot_info
-feature-fill** release: three reserved fields that passed `0` since
-v0.1.0 are now populated pre-ExitBootServices, all OPTIONAL +
-benign-on-failure (a normal boot with no extra ESP files is byte-for-byte
-unaffected). **No ABI change** — struct version `2`, magic `'AGNO'`,
-struct_size `0x78` unchanged; these offsets were reserved since v0.1.0.
+**0.5.1** — cut 2026-06-19 (awaiting user tag). Toolchain **pin-bump
+patch** release: `cyrius.cyml` pin `6.0.47` → `6.2.24` and the banner
+version string `v0.5.0` → `v0.5.1`. **No source behavior change** beyond
+the banner — boot path, handoff contract (magic `'AGNO'`, struct version
+`2`, struct_size `0x78`), and ABI are byte-for-byte identical to v0.5.0.
+Builds clean on the 6.2.x toolchain; structural + OVMF gates green
+(banner reads `gnoboot v0.5.1`). The 0.4.2 SetMode-bounce code is retained
+as-is (AMD-Zen scanout residue is kernel-side; see CHANGELOG [Unreleased]
+signpost).
+
+Prior — **0.5.0** (cut 2026-06-03): the **boot_info feature-fill**
+release: three reserved fields that passed `0` since v0.1.0 are now
+populated pre-ExitBootServices, all OPTIONAL + benign-on-failure (a normal
+boot with no extra ESP files is byte-for-byte unaffected). No ABI change.
 - `initramfs_phys` (0x10) / `initramfs_size` (0x18) ← `\boot\initramfs`
   (format-NEUTRAL path; kernel owns the format, sovereign INDR not Linux
   cpio.gz). The ISO live-`.iso` RAM-root gate.
 - `cmdline_phys` (0x20) ← `\boot\cmdline` (forward-compat; no consumer yet).
 - `acpi_rsdp_phys` (0x38) ← EFI Configuration Table walk (ACPI 2.0 GUID
   preferred, 1.0 fallback). Unblocks ACPI under UEFI.
-Also bumps the `cyrius.cyml` pin to `6.0.47`. The 0.4.2 SetMode-bounce
-code is retained as-is (AMD-Zen scanout residue is kernel-side; see
-CHANGELOG [Unreleased] signpost).
 
 ## Toolchain
 
-- **Cyrius pin**: `6.0.47` (in `cyrius.cyml [package].cyrius`) — advanced from
-  `6.0.14` at the v0.5.0 cut. Builds clean, structural gate PASS, no `ud2 ud2`.
-  (Build host has since drifted to cycc 6.0.48; pin held at 6.0.47 per the
-  user's explicit choice — known-good, not chased.)
+- **Cyrius pin**: `6.2.24` (in `cyrius.cyml [package].cyrius`) — advanced from
+  `6.0.47` at the v0.5.1 cut. Builds clean, structural gate PASS, no `ud2 ud2`.
+  (Build host wrapper is cycc 6.2.25; pin held at 6.2.24 per the user's
+  explicit choice — known-good, not chased. The build emits a benign
+  pin-drift warning; the pin is the source of truth, not the wrapper.)
 - Required cyrius features:
     - 5.11.49 — `_TARGET_EFI_APPLICATION` PE32+ EFI emit mode
     - 5.11.51 — byte-array literal `var foo[N] = { 0x.., 0x.., ... };`
