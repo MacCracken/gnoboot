@@ -21,15 +21,15 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot v0.5.1: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# "gnoboot v0.6.0: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
 # Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
 # release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
 # default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
 var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
-    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x35,0x00,    # 'v0.5'
-    0x2E,0x00, 0x31,0x00, 0x3A,0x00, 0x20,0x00,    # '.1: '
+    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x36,0x00,    # 'v0.6'
+    0x2E,0x00, 0x30,0x00, 0x3A,0x00, 0x20,0x00,    # '.0: '
     0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
     0x6F,0x00, 0x66,0x00, 0x66,0x00, 0x20,0x00,    # 'off '
@@ -210,6 +210,19 @@ var boot_info[15] = {
     #       0x70 is type=0 because trailing zeros put 0 there too)
     0x00, 0x00, 0x00, 0x00
 };
+
+# RDRAND entropy for KASLR (agnos 1.47.3). Single `rdrand rcx` → out. On the rare CF=0 failure rcx
+# is 0 (the slide falls to slot 0 = 32 MB, still a valid base); QEMU `-cpu max` and AMD Zen both
+# advertise RDRAND, so this is reliable on the supported targets. Kept minimal — gnoboot has no stdlib.
+fn rdrand_u64() {
+    var out = 0;
+    var pout = &out;                    # rax = &out (gnoboot's lea-into-rax idiom)
+    asm {
+        0x48; 0x0F; 0xC7; 0xF1;         # rdrand rcx
+        0x48; 0x89; 0x08;               # mov [rax], rcx   (rax = &out)
+    }
+    return out;
+}
 
 # === OUT slots + parse buffers ============================================
 
@@ -405,12 +418,12 @@ fn efi_main(handle, st): i64 {
     var p_filesz = load64(&phdr + 32);
     var p_memsz  = load64(&phdr + 40);
 
-    # agnos 1.47.3 KASLR bite 1: a PIE (ET_DYN) kernel links at base 0 (p_paddr=0); load it at the
-    # fixed kernel base 0x100000 so the existing hardcoded 0x1000A8 entry-jump still lands on the
-    # entry (the kernel is RIP-relative, so it runs correctly at any base). Bite 2 replaces this
-    # fixed base with an RDRAND-slid one + a jump to base+e_entry. A non-PIE ET_EXEC kernel keeps
-    # p_paddr=0x100000 and is unaffected.
-    if (p_paddr == 0) { p_paddr = 0x100000; }
+    # agnos 1.47.3 KASLR: ET_DYN (e_type=3) is the PIE kernel (links at base 0, p_paddr=0, base-relative
+    # e_entry 0xA8); ET_EXEC (2) is the legacy fixed kernel (absolute e_entry 0x1000A8). The load base
+    # and entry jump target are chosen at the AllocatePages step below (ET_DYN gets an RDRAND slide).
+    var e_type  = load8(&elf_hdr + 16);
+    var e_entry = load64(&elf_hdr + 24);
+    var kernel_jump_target = e_entry;
 
     # --- 8-10: AllocatePages + load segment ---
     # MemoryType arg = 1 (EfiLoaderCode), NOT 2 (EfiLoaderData). Modern
@@ -420,9 +433,36 @@ fn efi_main(handle, st): i64 {
     # LoaderCode signals "this is executable" and firmware leaves NX
     # clear in the live page tables we inherit post-EBS.
     var pages = (p_memsz + 0xFFF) / 0x1000;
-    store64(&alloc_addr, p_paddr);
-    rc = fncall4(fn_alloc, 2, 1, pages, &alloc_addr);
-    if (rc != 0) { efi_fail(st, &code_ap); return 0; }
+    if (e_type == 3) {
+        # KASLR bite 2b: the PIE kernel links at base 0 — slide it to an RDRAND-chosen, 2 MB-aligned
+        # base in [32 MB, 254 MB): above the kernel's fixed 0..18 MB scratch + 16 MB PMM ceiling, and
+        # below the 256 MB per-proc-CR3 identity extent (proc.cyr copies PD[0..127]). AllocatePages at
+        # that exact base; if the firmware has it reserved, re-roll up to 16x, then fall back to the
+        # fixed 0x100000 (still correct — the kernel is RIP-relative). 111 slots ≈ 6.8 bits of slide.
+        var ksl_ok = 0;
+        var ksl_try = 0;
+        while (ksl_try < 16) {
+            var ksl_r = rdrand_u64();
+            if (ksl_r < 0) { ksl_r = 0 - ksl_r; }
+            p_paddr = 0x2000000 + (ksl_r % 111) * 0x200000;
+            store64(&alloc_addr, p_paddr);
+            if (fncall4(fn_alloc, 2, 1, pages, &alloc_addr) == 0) { ksl_ok = 1; ksl_try = 16; }
+            else { ksl_try = ksl_try + 1; }
+        }
+        if (ksl_ok == 0) {
+            p_paddr = 0x100000;
+            store64(&alloc_addr, p_paddr);
+            if (fncall4(fn_alloc, 2, 1, pages, &alloc_addr) != 0) { efi_fail(st, &code_ap); return 0; }
+        }
+        kernel_jump_target = p_paddr + e_entry;     # PIE: the entry slides with the base
+    } else {
+        store64(&alloc_addr, p_paddr);
+        rc = fncall4(fn_alloc, 2, 1, pages, &alloc_addr);
+        if (rc != 0) { efi_fail(st, &code_ap); return 0; }
+    }
+    # KASLR: expose the chosen kernel load base to the kernel at boot_info+0x70 (the unused END-tag
+    # slot — no consumer walks tags). The kernel reports it as the `KASLR: kernel_base` slide probe.
+    store64(&boot_info + 0x70, p_paddr);
 
     rc = fncall2(fn_setpos, file, p_offset);
     if (rc != 0) { efi_fail(st, &code_sp); return 0; }
@@ -626,10 +666,14 @@ fn efi_main(handle, st): i64 {
     # leaves &boot_info in RAX for the asm below.
     var p = &boot_info;
     asm {
-        # mov rdi, rax     ; rdi = &boot_info (sovereign-struct ptr)
+        # mov rdi, rax     ; rdi = &boot_info (sovereign-struct ptr) — set FIRST, persists in rdi
         0x48; 0x89; 0xC7;
-        # mov eax, 0x1000A8 (zero-extends to rax = 0x00000000_001000A8)
-        0xB8; 0xA8; 0x00; 0x10; 0x00;
+    }
+    # rax = kernel_jump_target (load_base + e_entry for PIE; absolute e_entry for ET_EXEC). It is a
+    # stack local, so this load is `mov rax, [rbp-N]` — touches rax only, leaving rdi (= &boot_info)
+    # intact. (Verified by objdump of the emitted .text; see KASLR bite 2a.)
+    var jt = kernel_jump_target;
+    asm {
         # jmp rax
         0xFF; 0xE0;
     }

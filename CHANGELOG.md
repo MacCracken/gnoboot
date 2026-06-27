@@ -8,6 +8,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 > **Next-cycle signpost for the AMD-Zen Quiet-Boot scanout residue** (closed out at 0.4.2): the gnoboot-side GOP `SetMode` lever is exhausted on archaemenid. **Do NOT propose another SetMode variant** — both same-mode (0.4.1, Attempt 74) and different-mode bounce (0.4.2, Attempt 78) are firmware-elided on AMD Zen UEFI. Next channel for the bug is **kernel-side**, not gnoboot-side: either a minimal-redesign port of Linux's HUBP `clear_tiling` sequence (per amd-gfx ML; 3-6 MMIO writes per HUBP; DCN1→DCN3 register offsets inherited; Cezanne PCI BAR0 of `1002:1638`), OR an architectural decision about adopting shadow-buffer semantics for the AGNOS FB-console layer (simpledrm-style, per `archintel` Attempt 79 cross-check finding). Intel cross-check on archintel was structurally inconclusive (no BGRT table, hybrid Intel+NVIDIA GPU, Linux uses simpledrm). Older single-iGPU Intel box with BGRT-publishing firmware is the parked future discriminator. Full closeout record in `agnosticos/docs/development/iron-nuc-zen-log.md` § Attempt 79; memory pin: `project_amd_zen_scanout_residue`.
 
+## [0.6.0] — 2026-06-27
+
+### Added
+- **Full-binary KASLR — relocatable PIE-kernel load (pairs with agnos 1.47.4).** gnoboot now loads an
+  **ET_DYN (PIE)** AGNOS kernel at a per-boot-randomized physical base:
+  - **Slide (`rdrand_u64` + AllocatePages):** for an ET_DYN kernel (program-header `p_paddr=0`), pick an
+    RDRAND-chosen, 2 MB-aligned base in **[32 MB, 254 MB)** — above the kernel's fixed 0–18 MB scratch +
+    16 MB PMM ceiling, below the 256 MB per-proc-CR3 identity window — and `AllocatePages(AllocateAddress)`
+    there. If firmware reserves the slot, re-roll up to 16×, then fall back to the fixed `0x100000` (still
+    correct — the kernel is RIP-relative). 111 slots ≈ 6.8 bits of slide.
+  - **Computed entry jump:** the handoff jump is derived from the ELF header instead of the hardcoded
+    `0x1000A8` — `load_base + e_entry` for ET_DYN (the base-relative `0xA8` entry slides with the base), or
+    the absolute `e_entry` for a legacy ET_EXEC kernel.
+  - **Base hand-off:** the chosen load base is written to `boot_info+0x70` (the unused END-tag slot, no
+    tag-walker consumer) so the kernel reports it as `KASLR: kernel_base=<hex>` for the slide probe.
+  - A non-PIE **ET_EXEC** kernel loads at its program-header `p_paddr` and jumps to its absolute entry
+    exactly as before — zero behavior change for the fixed-base kernel.
+  - Validated by `agnos/scripts/kaslr-smoke.sh` (two boots → two distinct in-window 2 MB-aligned bases) +
+    `exec-smoke` 15/15 on a slid kernel (per-proc CR3 maps the slid base).
+
+### Changed
+- **Cyrius toolchain pin → 6.2.44** (from 6.2.24): picks up the PIE / `EMITELF64_KERNEL` ET_DYN codegen
+  path the KASLR load relies on.
+
 ## [0.5.1] — 2026-06-19
 
 Toolchain pin-bump patch release. Advances the `cyrius.cyml` pin
