@@ -405,6 +405,13 @@ fn efi_main(handle, st): i64 {
     var p_filesz = load64(&phdr + 32);
     var p_memsz  = load64(&phdr + 40);
 
+    # agnos 1.47.3 KASLR bite 1: a PIE (ET_DYN) kernel links at base 0 (p_paddr=0); load it at the
+    # fixed kernel base 0x100000 so the existing hardcoded 0x1000A8 entry-jump still lands on the
+    # entry (the kernel is RIP-relative, so it runs correctly at any base). Bite 2 replaces this
+    # fixed base with an RDRAND-slid one + a jump to base+e_entry. A non-PIE ET_EXEC kernel keeps
+    # p_paddr=0x100000 and is unaffected.
+    if (p_paddr == 0) { p_paddr = 0x100000; }
+
     # --- 8-10: AllocatePages + load segment ---
     # MemoryType arg = 1 (EfiLoaderCode), NOT 2 (EfiLoaderData). Modern
     # AMD UEFI firmware may NX-mark LoaderData pages under strict W^X
