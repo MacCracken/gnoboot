@@ -8,6 +8,47 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 > **Next-cycle signpost for the AMD-Zen Quiet-Boot scanout residue** (closed out at 0.4.2): the gnoboot-side GOP `SetMode` lever is exhausted on archaemenid. **Do NOT propose another SetMode variant** — both same-mode (0.4.1, Attempt 74) and different-mode bounce (0.4.2, Attempt 78) are firmware-elided on AMD Zen UEFI. Next channel for the bug is **kernel-side**, not gnoboot-side: either a minimal-redesign port of Linux's HUBP `clear_tiling` sequence (per amd-gfx ML; 3-6 MMIO writes per HUBP; DCN1→DCN3 register offsets inherited; Cezanne PCI BAR0 of `1002:1638`), OR an architectural decision about adopting shadow-buffer semantics for the AGNOS FB-console layer (simpledrm-style, per `archintel` Attempt 79 cross-check finding). Intel cross-check on archintel was structurally inconclusive (no BGRT table, hybrid Intel+NVIDIA GPU, Linux uses simpledrm). Older single-iGPU Intel box with BGRT-publishing firmware is the parked future discriminator. Full closeout record in `agnosticos/docs/development/iron-nuc-zen-log.md` § Attempt 79; memory pin: `project_amd_zen_scanout_residue`.
 
+> ⚠⚠ **THE SIGNPOST ABOVE IS A DIRECT RISK TO THE MODE SELECTION BELOW — and a QEMU pass does not
+> refute it.** It records that on AMD Zen UEFI `SetMode` is **firmware-elided**: both same-mode and
+> different-mode bounce forms were measured as no-ops on archaemenid across Attempts 74 and 78.
+> Native-resolution selection is a *different use* of that lever (choose a larger mode, rather than
+> bounce to force a scanout reset), so the 0.4.2 closeout does not cover it — but it rides the identical
+> firmware call that was measured inert **on this exact box**. QEMU/OVMF honoured it (800x600 →
+> 2048x2048); **archaemenid may ignore it and boot 800x600 exactly as before.**
+> That is what `fb_mode_chosen` (0x6C) is for: if a burn reports `fb_mode_chosen != fb_mode_current`,
+> gnoboot picked a better mode and the firmware refused it — the elision again — and the answer moves
+> **kernel-side to a real DCN modeset**. ⛔ On that outcome, do NOT propose another SetMode variant.
+
+### Added — native-resolution GOP mode selection
+
+gnoboot previously **inherited** whatever GOP mode the firmware left and restored it verbatim. On
+archaemenid that is 800x600 while the panel link trains at 2560x1440, so the AGNOS desktop rendered
+into the upper-left eighth of the screen — not an upscale, just a small surface on a large panel.
+
+`efi_main` now enumerates every mode via `QueryMode` (protocol vtable offset 0x00) and `SetMode`s the
+largest `width * height` whose `PixelFormat` is **0 (RGB)** or **1 (BGR)**. Formats 2 (BitMask) and
+3 (BltOnly) are refused: the kernel writes the framebuffer directly and BltOnly has no linear
+framebuffer at all, so inheriting one would hand AGNOS a surface it cannot draw into.
+
+This matches the convergent loader shape — Limine, systemd-boot, GRUB `gfxmode` and Linux efifb all
+select a mode rather than inheriting one.
+
+⚠ **Fail-safe by construction.** `best_mode` is seeded with `cur_mode`, so firmware offering nothing
+usable leaves the boot byte-identical to before this change. A `SetMode` that returns non-zero is
+followed by a restore to `cur_mode`. The existing post-`SetMode` geometry re-read is unchanged and
+remains the ground truth — `boot_info` always reports what is actually live, never what was intended.
+
+**boot_info 0x6C (u32) `fb_mode_chosen`** — new, in previously-reserved space. Records the mode gnoboot
+selected. Equal to `fb_mode_current` when nothing better was offered, different when selection fired,
+which lets a burn distinguish *"no larger mode existed"* from *"SetMode refused the one we picked"*.
+Wire version stays 2; no consumer walks the tag stream.
+
+**Measured (QEMU/OVMF, 30 modes offered):** 800x600 → **2048x2048**
+(`fb: mode=0/30 phys=0x80000000 pf=1 w=2048 h=2048 pitch=8192 size=0x1000000`). The AGNOS desktop
+still reaches `connected 2, presented 2, exit 95` at the new geometry, and `tests/ovmf_smoke.sh` boots
+clean. Archaemenid is expected to select 2560x1440 — **unverified until a burn**.
+
+
 ## [0.6.0] — 2026-06-27
 
 ### Added

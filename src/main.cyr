@@ -178,6 +178,11 @@ var acpi10_guid[2] = {
 #   0x5C  u32   fb_pixel_format  (0=RGB, 1=BGR, 2=Bitmask, 3=BltOnly)
 #   0x60  u32   fb_mode_current  (GOP Mode->Mode    — which mode is live)
 #   0x64  u32   fb_mode_max      (GOP Mode->MaxMode — how many modes exist)
+#   0x6C  u32   fb_mode_chosen   (0.7.0 — the mode gnoboot SELECTED. Equal to
+#                                 fb_mode_current when no larger RGB/BGR mode
+#                                 existed; differs when native-res selection
+#                                 fired. Lets a burn distinguish "nothing
+#                                 better offered" from "SetMode refused".)
 #   0x68  u64   fb_size          (GOP Mode->FrameBufferSize — UEFI 2.10
 #                                 §11.9.1 authoritative FB extent;
 #                                 kernel uses this for WC remap range
@@ -542,6 +547,59 @@ fn efi_main(handle, st): i64 {
             fncall2(fn_setmode, gop_p, bounce_mode);
         }
         fncall2(fn_setmode, gop_p, cur_mode);
+
+        # === NATIVE-RESOLUTION MODE SELECTION (0.7.0) ==========================================
+        # Until now gnoboot restored whatever mode the firmware left, which on archaemenid is
+        # 800x600 while the panel link trains at 2560x1440 — so the desktop rendered into the
+        # upper-left eighth of the screen. Every other convergent loader (Limine, systemd-boot,
+        # GRUB gfxmode, Linux efifb) picks a mode rather than inheriting one; this matches that
+        # shape. QueryMode is vtable offset 0x00:
+        #   EFI_STATUS QueryMode(This, ModeNumber, UINTN *SizeOfInfo, EFI_..._INFORMATION **Info)
+        # Selection: largest width*height whose PixelFormat is 0 (RGB) or 1 (BGR). Formats 2
+        # (BitMask) and 3 (BltOnly) are REFUSED — the kernel writes the framebuffer directly and
+        # BltOnly has no linear FB at all, so inheriting one would hand agnos a surface it cannot
+        # draw into.
+        # ⚠ FAIL-SAFE BY CONSTRUCTION: best_mode starts as cur_mode, so a firmware that returns
+        # nothing usable leaves the boot exactly as it was before this block existed. A failed
+        # SetMode is followed by a restore to cur_mode, and the geometry re-read below reports
+        # whatever is actually live — never what was intended.
+        var fn_querymode = load64(gop_p + 0x00);
+        var qm_sz = 0;
+        var qm_inf = 0;
+        var best_mode = cur_mode;
+        var best_px = 0;
+        var mi = 0;
+        while (mi < max_mode) {
+            qm_sz = 0;
+            qm_inf = 0;
+            if (fncall4(fn_querymode, gop_p, mi, &qm_sz, &qm_inf) == 0) {
+                if (qm_inf != 0) {
+                    var q_pf = load32(qm_inf + 0x0C);
+                    var ok = 0;
+                    if (q_pf == 0) { ok = 1; }
+                    if (q_pf == 1) { ok = 1; }
+                    if (ok == 1) {
+                        var q_w = load32(qm_inf + 0x04);
+                        var q_h = load32(qm_inf + 0x08);
+                        var q_px = q_w * q_h;
+                        if (q_px > best_px) {
+                            best_px = q_px;
+                            best_mode = mi;
+                        }
+                    }
+                }
+            }
+            mi = mi + 1;
+        }
+        if (best_mode != cur_mode) {
+            if (fncall2(fn_setmode, gop_p, best_mode) != 0) {
+                fncall2(fn_setmode, gop_p, cur_mode);   # refused — put it back exactly as found
+            }
+        }
+        # Record what was CHOSEN vs what the firmware booted with, so a burn can tell "no better
+        # mode existed" from "a better mode existed and SetMode refused it". The geometry captured
+        # below is the ground truth either way.
+        store32(&boot_info + 0x6C, best_mode);
 
         # Re-read fields AFTER SetMode — firmware is spec-allowed to
         # reallocate the FB BAR + relocate Mode->Info on SetMode, so
