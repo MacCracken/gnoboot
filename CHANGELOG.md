@@ -19,6 +19,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > gnoboot picked a better mode and the firmware refused it — the elision again — and the answer moves
 > **kernel-side to a real DCN modeset**. ⛔ On that outcome, do NOT propose another SetMode variant.
 
+## [0.6.1] — 2026-08-03
+
+### Fixed — the OVMF smoke's banner gate was pinned to a stale version
+
+`tests/ovmf_smoke.sh:25` hardcoded `EXPECT="gnoboot v0.5.1: …"` while `VERSION` read `0.6.0`, so the
+banner check had been failing for an entire release — and a stale literal in the *test* is
+indistinguishable from a broken build. `EXPECT` now derives from `VERSION`, so a bump cannot leave it
+behind again. (Found by bumping to 0.6.1 and watching the gate fail for the wrong reason.)
+
 ### Added — native-resolution GOP mode selection
 
 gnoboot previously **inherited** whatever GOP mode the firmware left and restored it verbatim. On

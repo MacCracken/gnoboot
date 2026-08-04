@@ -22,7 +22,11 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EFI="${1:-$ROOT/build/BOOTX64.EFI}"
-EXPECT="${EXPECT:-gnoboot v0.5.1: handing off to kernel}"
+# ⛔ DERIVED FROM VERSION, never hardcoded. This line read "v0.5.1" while VERSION said 0.6.0, so the
+# banner gate had been silently failing across a whole release — a stale literal in the TEST looks
+# exactly like a broken build. Reading VERSION means a version bump can never leave it behind again.
+GNOBOOT_VERSION="$(cat "$(dirname "$0")/../VERSION" 2>/dev/null | tr -d '[:space:]')"
+EXPECT="${EXPECT:-gnoboot v${GNOBOOT_VERSION}: handing off to kernel}"
 
 # OVMF firmware paths differ between distros — probe both common
 # locations. Arch: edk2-ovmf installs to /usr/share/edk2-ovmf/x64/
