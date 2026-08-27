@@ -19,6 +19,90 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > gnoboot picked a better mode and the firmware refused it — the elision again — and the answer moves
 > **kernel-side to a real DCN modeset**. ⛔ On that outcome, do NOT propose another SetMode variant.
 
+## [0.6.2] — 2026-08-26
+
+Toolchain pin-bump patch release. Advances the `cyrius.cyml` pin `6.2.44` → `6.5.35`, re-vendors
+`lib/fnptr.cyr` from the matching stdlib snapshot, and bumps the banner version string. **No gnoboot
+source behavior change** beyond the banner — the boot path, handoff contract (magic `'AGNO'`, struct
+version `2`, `struct_size 0x78`), and ABI are identical to v0.6.1. Structural + OVMF gates green
+(banner reads `gnoboot v0.6.2`).
+
+**Measured, not assumed:** building the pre-bump and post-bump trees under the same compiler produces
+binaries differing in **exactly one byte** — file offset `0x2CE9`, the `imm8` of
+`mov byte [rcx+0x1a], 0x32`, which is the banner's patch digit `'1'` → `'2'`. The `lib/fnptr.cyr`
+refresh contributes zero emitted bytes.
+
+### Changed
+
+- **`cyrius.cyml` toolchain pin `6.2.44` → `6.5.35`** — `6.5.35` is the latest *released* cyrius
+  (published 2026-08-22; the `install.sh` release asset resolves, so CI can install it) and is also
+  the local wrapper version, so the pin-drift warning that rode every build since v0.5.1 clears.
+  Two in-range changes actually reach gnoboot:
+    - **6.5.17** — `fncall0..fncall8` are now lowered by the compiler as inline indirect calls
+      instead of calling into `lib/fnptr.cyr`. Under `CYRIUS_TARGET_EFI=1` that takes the MS-x64
+      `ECALLPTR_PE` path (shadow space, 16-byte stack alignment, and the 6.4.43 fix that leaves
+      `r12`/`r14`/`r15` untouched).
+
+      **The lowering fires in expression position only — it reaches 25 of gnoboot's 28
+      `fncallN` sites, not all 28.** The three exceptions are the statement-position,
+      result-discarded calls `fncall2(fn_setmode, …)` at `src/main.cyr:547`, `:549` and `:596`
+      — the GOP `SetMode` bounce and its two restores. A bare statement of the form
+      `IDENT(...)` never enters the expression parser, so those three still `call` the vendored
+      `fncall2` trampoline (confirmed by disassembly: three `call 0x1400010c2` sites in the
+      emitted image). They run pre-EBS on every boot where `LocateProtocol(GOP)` succeeds, so
+      `lib/fnptr.cyr` remains **live code on the boot path**, not documentation.
+
+      This is why the build reports `8 unreachable fns (1241 bytes)` while nine `fncallN`
+      bodies are vendored: `CYRIUS_DCE_VERBOSE=1` lists `fncall0, fncall1, fncall3..fncall8`
+      as dead — `fncall2` is absent. Note the two call forms differ in how they get their
+      stack alignment: the inlined form force-aligns (`and rsp,-16` before `sub rsp,0x20`),
+      while the `fncall2` trampoline relies on prologue-derived alignment.
+    - **6.5.35** — a register-allocator release (loop-aware live intervals). gnoboot's two
+      hand-verified codegen idioms are unaffected: cyrius skips register allocation for any fn whose
+      body contains inline asm, and both `efi_main` and `rdrand_u64` do. Re-verified by disassembly
+      rather than assumed — see **Verified** below.
+- **`lib/fnptr.cyr` re-vendored to the 6.5.35 snapshot** via `cyrius lib sync` — **comment-only**:
+  a single +17/−0 hunk adding an "Extern-C prerequisite — a glibc-compatible `%fs`" note. Zero code
+  lines; all nine `fncall0..8` bodies byte-identical. Note that `cyrius lib sync` vendors from the
+  **manifest pin**, not the installed wrapper — so the pin bump has to land first, or the sync
+  silently re-vendors the old snapshot and reports success.
+- **Banner version string `v0.6.1` → `v0.6.2`** (`msg_pre` in `src/main.cyr`). `tests/ovmf_smoke.sh`
+  derives `EXPECT` from `VERSION` as of 0.6.1, so no test edit was needed.
+
+### Fixed
+
+- **`src/main.cyr` mislabelled the 0.6.1 native-resolution work as `0.7.0` in two comments** —
+  the `boot_info` field map entry for `fb_mode_chosen` (0x6C) at line 181, and the
+  `NATIVE-RESOLUTION MODE SELECTION` section banner at line 551. Both shipped in **0.6.1**.
+  Comment-only; offsets, widths, and semantics were all correct.
+- **`docs/guides/getting-started.md` still described the OVMF smoke's default `EXPECT` as
+  `gnoboot v0.1.0`, read "from `src/main.cyr`'s banner constant"** — stale since 0.2.0, and wrong
+  about the mechanism since 0.6.1 made `EXPECT` derive from `VERSION`. Reworded version-free so it
+  cannot rot again.
+
+### Verified
+
+- Structural gate (`tests/verify_pe.sh`) PASS — subsystem `0x000A`, `NX_COMPAT` set, no
+  `RELOCS_STRIPPED`.
+- OVMF runtime gate (`tests/ovmf_smoke.sh`) PASS — `gnoboot v0.6.2: handing off to kernel` observed
+  on ConOut, booting the real 1.9 MB `agnos` ELF64 payload.
+- `ud2 ud2` scan clean (0 occurrences) — the signature of the v6.0.0
+  `CYRIUS_TARGET_EFI ⇒ CYRIUS_TARGET_WIN` regression gnoboot filed at v0.4.x.
+- **Handoff sequence re-disassembled** — checked rather than assumed, because 6.5.35 is a regalloc
+  release:
+
+  ```
+  mov  rax, 0x1400061b0      ; &boot_info
+  mov  [rbp-0x2b0], rax
+  mov  rdi, rax              ; RDI = &boot_info
+  mov  rax, [rbp-0x108]      ; kernel_jump_target — touches rax only
+  mov  [rbp-0x2b8], rax
+  jmp  rax
+  ```
+
+  Nothing between `mov rdi, rax` and `jmp rax` writes `RDI`. The `rdrand_u64` idiom
+  (`lea rax,[rbp-8]` → `rdrand rcx` → `mov [rax], rcx`) holds too.
+
 ## [0.6.1] — 2026-08-03
 
 ### Fixed — the OVMF smoke's banner gate was pinned to a stale version

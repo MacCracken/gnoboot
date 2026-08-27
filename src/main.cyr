@@ -21,7 +21,7 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot v0.6.1: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# "gnoboot v0.6.2: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
 # Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
 # release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
 # default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
@@ -29,7 +29,7 @@ var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
     0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x36,0x00,    # 'v0.6'
-    0x2E,0x00, 0x31,0x00, 0x3A,0x00, 0x20,0x00,    # '.1: '
+    0x2E,0x00, 0x32,0x00, 0x3A,0x00, 0x20,0x00,    # '.2: '
     0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
     0x6F,0x00, 0x66,0x00, 0x66,0x00, 0x20,0x00,    # 'off '
@@ -178,7 +178,7 @@ var acpi10_guid[2] = {
 #   0x5C  u32   fb_pixel_format  (0=RGB, 1=BGR, 2=Bitmask, 3=BltOnly)
 #   0x60  u32   fb_mode_current  (GOP Mode->Mode    — which mode is live)
 #   0x64  u32   fb_mode_max      (GOP Mode->MaxMode — how many modes exist)
-#   0x6C  u32   fb_mode_chosen   (0.7.0 — the mode gnoboot SELECTED. Equal to
+#   0x6C  u32   fb_mode_chosen   (0.6.1 — the mode gnoboot SELECTED. Equal to
 #                                 fb_mode_current when no larger RGB/BGR mode
 #                                 existed; differs when native-res selection
 #                                 fired. Lets a burn distinguish "nothing
@@ -548,7 +548,7 @@ fn efi_main(handle, st): i64 {
         }
         fncall2(fn_setmode, gop_p, cur_mode);
 
-        # === NATIVE-RESOLUTION MODE SELECTION (0.7.0) ==========================================
+        # === NATIVE-RESOLUTION MODE SELECTION (0.6.1) ==========================================
         # Until now gnoboot restored whatever mode the firmware left, which on archaemenid is
         # 800x600 while the panel link trains at 2560x1440 — so the desktop rendered into the
         # upper-left eighth of the screen. Every other convergent loader (Limine, systemd-boot,

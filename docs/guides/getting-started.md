@@ -62,8 +62,9 @@ synthetic stub), boots under `qemu-system-x86_64 -cpu max -machine q35`
 with OVMF firmware. Greps the firmware ConOut serial output for the
 expected banner.
 
-Default expected banner is `gnoboot v0.1.0` (from `src/main.cyr`'s
-banner constant). Override with `EXPECT="something"`:
+Default expected banner is `gnoboot v<VERSION>` — derived from the
+`VERSION` file by `tests/ovmf_smoke.sh`, and matching the `msg_pre`
+banner constant in `src/main.cyr`. Override with `EXPECT="something"`:
 
 ```sh
 EXPECT="AGNOS kernel v1.30.0" tests/ovmf_smoke.sh
