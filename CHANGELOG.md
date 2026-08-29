@@ -19,6 +19,68 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > gnoboot picked a better mode and the firmware refused it — the elision again — and the answer moves
 > **kernel-side to a real DCN modeset**. ⛔ On that outcome, do NOT propose another SetMode variant.
 
+### Added — documentation
+
+- **`docs/audit/2026-08-29-audit.md` — gnoboot's first security / hardening audit**,
+  re-derived from `src/main.cyr` at tag `0.6.2`. Satisfies the v1.0 *"security audit
+  pass"* criterion in [`roadmap.md`](docs/development/roadmap.md). **10 findings**
+  (F1–F10) and **9 verified-sound** paths (S1–S9). No code changed in this pass — the
+  audit is the scoping document for the next cut.
+
+  **Headline finding: `SECURITY.md` documents defenses that are not implemented.**
+  Its threat model claims gnoboot defends against *"malformed kernel files … oversized
+  program-header counts, malformed PT_LOAD entries. Bounds-checked at parse time; fail
+  to a status print before EBS."* None of those three clauses holds — `e_phnum` is
+  never read, no `PT_LOAD` field is bounds-checked, and the pre-load ELF check is a
+  single byte (`0x7F` only). The section's other two claims — fail-closed
+  `GetMemoryMap` and the straight-line `GetMemoryMap`→`ExitBootServices` path — were
+  verified **sound**. `SECURITY.md` is reconciled in the same cut that lands the fixes.
+
+  The two HIGH-severity pairs are reachable **non-adversarially** — a truncated
+  `\boot\agnos` from an interrupted `dd` / bad USB write / failed ISO build is the
+  realistic trigger, not an attacker (who, per the accepted threat model, could simply
+  substitute a valid kernel):
+    - **No short-read check on the kernel segment `Read`** (`main.cyr:475-477`). UEFI
+      2.10 §13.5.1 lets `Read` transfer fewer bytes and still return `EFI_SUCCESS`; the
+      BSS zero-fill then covers only `[p_filesz, p_memsz)`, leaving the un-read tail as
+      whatever `AllocatePages` returned — **undefined** per UEFI 2.x §7.2 — and gnoboot
+      jumps into it.
+    - **`p_filesz` / `p_memsz` unbounded** (`main.cyr:440`, `:476`). `p_filesz > p_memsz`
+      is never rejected, so the `Read` overruns an allocation sized from `p_memsz`; and
+      `p_memsz` in `[0xFFFFFFFFFFFFF001, u64::MAX]` wraps `(p_memsz + 0xFFF) / 0x1000`
+      to **`pages = 0`**.
+
+  In both cases `load_esp_blob` — the *optional* initramfs/cmdline path added at
+  v0.5.0 — **already guards exactly these**, with a 1 GiB cap whose comment names the
+  identical overflow. The mandatory kernel path is the less-safe one.
+
+  Also found: the `0x70` `kernel_base` store added at v0.6.0 **destroyed the boot_info
+  tag-stream END terminator** while the in-file layout comment still documents one
+  there (F5 — blocks the M4 spec doc); RDRAND CF=0 failure **silently voids KASLR**
+  rather than degrading loudly (F6); `0 - i64::MIN` escapes the KASLR window (F7); and
+  firmware-supplied counts are bounded inconsistently — the ACPI walk caps at 256, the
+  GOP `QueryMode` loop does not (F9).
+
+  Verified sound and unchanged: the no-boot-services-between-`GetMemoryMap`-and-EBS
+  rule, the honest 16 KB memmap buffer, path-traversal immunity by construction (all
+  three ESP paths are compile-time constants), exact header-read buffer sizing, the BSS
+  zero-fill, and the `mov rdi, rax` / `jmp rax` handoff sequence.
+
+  Two cyrius integer semantics the findings depend on were **measured against the
+  pinned toolchain**, not assumed: `%` is C-truncated (negative dividend → negative
+  remainder), `0 - i64::MIN` stays negative, and `load32` zero-extends.
+
+### Fixed — documentation
+
+- **`docs/development/state.md`** — corrected two stale claims: v0.6.2 was recorded as
+  *"awaiting user tag"* when it is tagged (`0.6.2` → `741e935`), and the Toolchain
+  section claimed the pin-drift warning was *"gone"* when drift has reappeared (local
+  `cycc` `6.5.36` vs pin `6.5.35`; harmless — nothing in 6.5.36 is a gnoboot
+  dependency). Added an **Audit** section.
+- **`docs/development/roadmap.md`** — M5's scope text lists *"zero-fills BSS"* as future
+  work. The code has done it since Step 7 (`main.cyr:503-511`); the audit records it as
+  verified-sound S6. Text corrected.
+
 ## [0.6.2] — 2026-08-26
 
 Toolchain pin-bump patch release. Advances the `cyrius.cyml` pin `6.2.44` → `6.5.35`, re-vendors

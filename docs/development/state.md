@@ -3,11 +3,11 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; awaiting user tag). Prior: 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
+> **Last refresh**: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md). No code changed; the audit is the scoping document for **v0.7.0 “ELF-load hardening”**, which merges roadmap M5 + M7 because they are the same code region. Headline: `SECURITY.md`’s “malformed kernel files … bounds-checked at parse time” claim does **not** hold — `e_phnum` is never read, no `PT_LOAD` field is bounds-checked, and the pre-load ELF check is one byte. 10 findings / 9 verified-sound. Gates re-run green at 0.6.2). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.6.2** — cut 2026-08-26 (awaiting user tag). Toolchain **pin-bump
+**0.6.2** — cut 2026-08-26, **tagged** (`0.6.2` → `741e935`). Toolchain **pin-bump
 patch** release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr`
 re-vendored from the 6.5.35 stdlib snapshot, and the banner version
 string `v0.6.1` → `v0.6.2`. **No gnoboot source behavior change** beyond
@@ -63,10 +63,12 @@ change.
   from `6.2.44` at the v0.6.2 cut (and `6.2.24` → `6.2.44` at v0.6.0,
   which was never recorded here). `6.5.35` is the latest **released**
   cyrius (published 2026-08-22; the `install.sh` release asset resolves,
-  so CI can install it) **and** the local wrapper version — so for the
-  first time since v0.5.1 the pin, `~/.cyrius/current`, and the latest
-  published release all agree, and the benign pin-drift warning that rode
-  every build is gone.
+  so CI can install it). At the v0.6.2 cut it was also the local wrapper
+  version — the first time since v0.5.1 that pin, `~/.cyrius/current`, and
+  latest-published all agreed. **Drift has since reappeared** (observed
+  2026-08-29: local `cycc` is `6.5.36`, pin is `6.5.35`), so the benign
+  pin-drift warning rides every build again. Harmless — nothing in 6.5.36
+  is a gnoboot dependency — but it is back.
 - Required cyrius features:
     - 5.11.49 — `_TARGET_EFI_APPLICATION` PE32+ EFI emit mode
     - 5.11.51 — byte-array literal `var foo[N] = { 0x.., 0x.., ... };`
@@ -195,6 +197,39 @@ Declaring `"syscalls"` would grow `lib/` from 1 file to 8 (`syscalls.cyr`
 plus six per-OS/per-arch peers), which is why it has been left alone. The
 real choice is: declare the deps and get `cyrius test` green, or delete
 `src/test.cyr` + `tests/gnoboot.tcyr` and drop `[build].test`. Unresolved.
+
+## Audit
+
+- **First security audit — landed 2026-08-29**:
+  [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), re-derived
+  from `src/main.cyr` at tag `0.6.2`. **10 findings** (2 HIGH-severity pairs, 3
+  MEDIUM, 4 LOW/INFO) and **9 verified-sound** paths. Satisfies the v1.0
+  *"security audit pass"* criterion; **no code changed in that pass** — it is the
+  scoping document for v0.7.0.
+- **Headline**: `SECURITY.md` § Threat model claims gnoboot defends against
+  *"malformed kernel files … oversized program-header counts, malformed PT_LOAD
+  entries. Bounds-checked at parse time"*. **None of those three clauses holds**
+  — `e_phnum` is never read (only `phdr[0]` is honored), no `PT_LOAD` field is
+  bounds-checked, and the pre-load ELF check is a single byte. The section's
+  other two claims (fail-closed `GetMemoryMap`, straight-line map-key path) were
+  verified sound. `SECURITY.md` must be reconciled in the same cut as the fixes.
+- **The sharp pair** (both reachable *non-adversarially*, e.g. a truncated
+  `\boot\agnos` from an interrupted write): the kernel segment `Read` never
+  checks for a short read, and `p_filesz`/`p_memsz` are never bounded — so
+  `p_filesz > p_memsz` overruns the allocation, and `p_memsz` near `u64::MAX`
+  wraps `(p_memsz + 0xFFF) / 0x1000` to **zero pages**. `load_esp_blob` already
+  guards *both* of these on the optional path — the mandatory kernel path is the
+  less-safe one.
+- **Roadmap reconciliation**: the audit produced the same work list the roadmap
+  already had, better ordered. M5 (multi-`PT_LOAD`) is finding F2; M7
+  (validation hooks) is F1 + F4; M4 (spec doc) is blocked on F5 (the `0x70`
+  `kernel_base` store destroyed the tag-stream END terminator, and the in-file
+  layout comment still documents an END there). Recommended next cut is
+  **v0.7.0 "ELF-load hardening"** — M5 + M7 merged, since they are the same
+  twenty lines.
+- **Roadmap text is stale in one place**: M5 lists "zero-fills BSS" as future
+  work; the code has done it since Step 7 (`main.cyr:503-511`, verified sound
+  as S6).
 
 ## Consumers
 

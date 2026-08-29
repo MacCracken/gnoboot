@@ -26,9 +26,15 @@ spinoffs) can depend on a stable boot ABI.
       across the cyrius pin range used in CI.
 - [ ] **CHANGELOG complete from v0.1.0 onward** — every release
       entry has a Breaking/Added/Changed/Fixed split where applicable.
-- [ ] **Security audit pass** (`docs/audit/YYYY-MM-DD-audit.md`)
-      — bounds on every Read, validated sizes from firmware-supplied
-      structures, no path traversal in `\boot\agnos` resolution.
+- [x] **Security audit pass** — ✅ **first pass landed 2026-08-29**:
+      [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md).
+      The criterion's three named sub-claims resolve as: *bounds on every
+      Read* → **not met** (findings F3, F4 — fixed in v0.7.0); *validated
+      sizes from firmware-supplied structures* → **partially met** (memmap
+      fail-closed is sound; GOP/config-table counts are bounded
+      inconsistently, F9); *no path traversal in `\boot\agnos` resolution*
+      → **met by construction** (S3 — all three ESP paths are compile-time
+      constants, nothing is concatenated). Re-run the pass after v0.7.0.
 - [ ] **v1 retrospective drafted** in `docs/development/retro/v1_cycle.md`
       — what worked across v0.1 → v1.0, what didn't, what carries forward.
 
@@ -133,17 +139,102 @@ for v1.0.** Re-slots to **~v0.6.0** now that v0.5.0 is the boot_info
 feature-fill; should be drafted once the v0.5.0 fills settle the field
 layout (so the spec documents the as-shipped struct, not a moving target).
 
-### M5 — v0.6.0 — multi-PT_LOAD support
+> **The 2026-08-29 audit found the blocker (F5).** The spec cannot be written
+> until one decision is made: **is `boot_info` a flat 120-byte struct, or a
+> struct followed by a tag stream?** The layout comment says the latter and
+> documents an END terminator at `0x70` — but v0.6.0's `kernel_base` store
+> overwrote it, so no terminator exists and `struct_size` still reports 120. No
+> shipped consumer walks tags (agnos reads fixed offsets), so nothing is broken
+> today; but *"every reserved tag-type slot listed"* is a v1.0 criterion, and the
+> struct currently contradicts its own documentation. Either declare it flat and
+> drop the tag-stream concept, or grow it to 128 bytes and restore an END at
+> `0x78`. **That call is M4's first task, not its last.**
 
-Today the kernel loader assumes a single PT_LOAD (true for agnos
-1.30.x). v0.6.0 walks all `e_phnum` program headers, AllocatePages
-per PT_LOAD, copies file segments into place, zero-fills BSS.
-Forward-compat with kernels that may grow .data/.bss into separate
-segments, and with non-agnos kernels (Linux's `bzImage` shape is
-multi-segment under multiboot2; sovereign-struct can deliver that
-too if a Linux variant ever wants to consume our handoff).
+### M5 — multi-PT_LOAD support — **re-slotted into v0.7.0, merged with M7**
 
-### M6 — v0.7.0 — verbose-serial diagnostic mode
+> **Re-scoped by the 2026-08-29 audit** ([`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md),
+> finding **F2**). The version label `v0.6.0` is stale — that slot went to the
+> KASLR / ET_DYN arc. M5 and M7 turned out to be **the same twenty lines of
+> code**, so they ship together as v0.7.0 below.
+
+Today the kernel loader assumes a single PT_LOAD: `e_phnum` is never read, only
+`phdr[0]` is honored, and a first program header that is not `PT_LOAD` is a hard
+`PT` failure. The audit reclassifies this from *forward-compat feature* to
+**correctness bug** — a kernel with 2+ `PT_LOAD` segments (any hardened RX-text /
+RW-data split) is **silently under-loaded**, not cleanly rejected. `e_phentsize`
+is likewise assumed to be 56 with no check.
+
+v0.7.0 walks all `e_phnum` program headers, AllocatePages per PT_LOAD, copies
+file segments into place, zero-fills each BSS gap. Forward-compat with kernels
+that may grow .data/.bss into separate segments, and with non-agnos kernels
+(Linux's `bzImage` shape is multi-segment under multiboot2; sovereign-struct can
+deliver that too if a Linux variant ever wants to consume our handoff).
+
+> **Correction**: this section previously listed *"zero-fills BSS"* as future
+> work. gnoboot has zeroed `[p_filesz, p_memsz)` since Step 7
+> (`src/main.cyr:503-511`) precisely because `AllocatePages` does not guarantee
+> zeroed memory (UEFI 2.x §7.2) — audit S6, verified sound. What v0.7.0 adds is
+> doing it **per segment** rather than for the single assumed one.
+
+### v0.7.0 — ELF-load hardening (M5 + M7 merged) — **next cut**
+
+> **Scoped by the 2026-08-29 audit.** The audit did not produce a work list
+> parallel to this roadmap — it produced the same list, better ordered. Every
+> item below is an audit finding; severities are per `SECURITY.md`'s rubric.
+> Full detail, including the verified-sound paths that need no change, is in
+> [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md).
+
+The unifying observation: **`load_esp_blob` — the *optional* initramfs/cmdline
+path added at v0.5.0 — is already hardened the way the *mandatory* kernel path
+is not.** Most of this release is "bring the kernel load up to what the optional
+load already does."
+
+1. **F1 (HIGH) — validate the ELF header before using it.** The pre-load check is
+   one byte (`0x7F`). Add the remaining magic bytes, `EI_CLASS`, `EI_DATA`,
+   `e_machine == 0x3E`, and `e_phentsize == 56` — **before** `e_phoff` is allowed
+   to drive `SetPosition`. This is M7's *"kernel ELF magic + machine match"* hook,
+   moved to where it gates rather than where it merely backstops.
+2. **F2 (MEDIUM) — walk all `e_phnum` program headers.** This is M5, above.
+3. **F3 (HIGH) — check for short reads.** UEFI 2.10 §13.5.1 lets `Read` transfer
+   fewer bytes and still return `EFI_SUCCESS`. `load_esp_blob` already guards
+   this; the kernel segment read and both header reads do not.
+4. **F4 (HIGH) — bound `p_filesz` / `p_memsz` / `p_offset`.** Reject
+   `p_filesz > p_memsz` (copy overrun) and cap `p_memsz` before the page-count
+   arithmetic (wrap → zero-page allocation). `load_esp_blob`'s 1 GiB cap is the
+   precedent, and its comment already names the identical overflow.
+5. **F6 (MEDIUM) — make KASLR fail loudly.** Retry `rdrand` on CF=0 (Intel
+   guidance: 10 attempts) and set a `boot_info` flags bit on exhaustion, so the
+   kernel reports *"KASLR: entropy unavailable"* instead of a fixed 32 MB base
+   that is indistinguishable from a randomized one.
+6. **F7 (LOW) — mask instead of negate** in the KASLR slide, so `i64::MIN` cannot
+   escape the window.
+7. **F9 (LOW) — bound the remaining firmware-supplied counts** for consistency
+   with the ACPI walk's existing 256 cap: `max_mode` in the `QueryMode` loop,
+   `ctab == 0`, and `dsz == 0`.
+8. **F5 (MEDIUM) — correct the `boot_info` layout comment**, which still documents
+   an END terminator at `0x70` that the v0.6.0 `kernel_base` store overwrote. The
+   *decision* about what the struct actually is belongs to M4, below; v0.7.0 only
+   stops the comment from lying.
+9. **Reconcile `SECURITY.md`** in the same cut — its threat model currently claims
+   bounds-checking that items 1–4 are what actually implement.
+
+Deferred from M7 to a later cut unless it proves cheap: the **memmap sanity** hook
+and the two-call `GetMemoryMap` sizing pattern (audit F8 — safe today, just
+brittle at >16 KB maps). Note the ordering constraint: the sizing `AllocatePages`
+must happen *before* the final `GetMemoryMap`, or it invalidates the map key.
+Also deferred: the **handoff struct self-consistency** hook, which cannot be
+written until M4 settles F5.
+
+### M6 — verbose-serial diagnostic mode — **re-slot and re-scope before building**
+
+> **⚠ Flagged by the 2026-08-29 audit.** The version label `v0.7.0` is now taken
+> by the hardening cut above. More importantly: this milestone is specced as
+> *serial*-print diagnostics, and **archaemenid has no serial cable** — which is
+> exactly why the 0.4.0 kernel-side audit results were made to sink to CMOS. A
+> serial-only diagnostic mode does not help the one box that matters. Re-scope
+> to the transport that reached iron (CMOS, or the framebuffer) before building
+> it, or accept that it is a QEMU-only convenience.
+
 
 `/boot/gnoboot.cfg` (UTF-8 INI-like) toggles a verbose mode that
 serial-prints every firmware call result, every parsed ELF/program-
@@ -152,7 +243,13 @@ contents (hex-dump) before EBS. Off by default (silent boot when
 disabled); on by default in `*.dev` builds. Costs ~1 KB binary
 size, ~2 sec boot-time when enabled.
 
-### M7 — v0.8.0 — boot-info validation hooks
+### M7 — boot-info validation hooks — **absorbed into v0.7.0 above**
+
+> **Re-scoped by the 2026-08-29 audit.** Two of the three hooks below are audit
+> findings F1 and F4 and ship in v0.7.0. The third cannot be written yet — see
+> the note under *Handoff struct self-consistency*. Kept for milestone-numbering
+> continuity.
+
 
 Three optional security/sanity hooks before EBS:
 
@@ -163,7 +260,11 @@ Three optional security/sanity hooks before EBS:
   re-check before jumping).
 - **Handoff struct self-consistency**: walk the END terminator;
   assert `struct_size` matches the inlined-fields layout's computed
-  size.
+  size. **⛔ Cannot be written as specced** — audit **F5** found there
+  *is* no END terminator: the v0.6.0 `kernel_base` store at `0x70`
+  overwrote it, so a tag walker reads `type = low32(kernel_base)` and
+  `size = 0`. Blocked on M4 deciding whether boot_info is a flat
+  120-byte struct or a struct plus a real tag stream.
 
 Each hook can be opt-out via `/boot/gnoboot.cfg`. Aimed at production
 deployment where a stuck-at-EBS surface is better than booting a
