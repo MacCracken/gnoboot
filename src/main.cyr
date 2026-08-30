@@ -21,15 +21,15 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot v0.6.2: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# "gnoboot v0.7.0: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
 # Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
 # release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
 # default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
 var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
-    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x36,0x00,    # 'v0.6'
-    0x2E,0x00, 0x32,0x00, 0x3A,0x00, 0x20,0x00,    # '.2: '
+    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x37,0x00,    # 'v0.7'
+    0x2E,0x00, 0x30,0x00, 0x3A,0x00, 0x20,0x00,    # '.0: '
     0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
     0x6F,0x00, 0x66,0x00, 0x66,0x00, 0x20,0x00,    # 'off '
@@ -59,9 +59,16 @@ var code_sfs[1] = { 0x53,0x00, 0x46,0x00, 0x53,0x00, 0x20,0x00 };    # "SFS "  H
 var code_vol[1] = { 0x56,0x00, 0x4F,0x00, 0x4C,0x00, 0x20,0x00 };    # "VOL "  OpenVolume
 var code_opn[1] = { 0x4F,0x00, 0x50,0x00, 0x4E,0x00, 0x20,0x00 };    # "OPN "  Open(\boot\agnos)
 var code_rd [1] = { 0x52,0x00, 0x44,0x00, 0x20,0x00, 0x20,0x00 };    # "RD  "  file Read
-var code_elf[1] = { 0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x20,0x00 };    # "ELF "  ELF magic mismatch
+var code_elf[1] = { 0x45,0x00, 0x4C,0x00, 0x46,0x00, 0x20,0x00 };    # "ELF "  ELF identity reject (magic / class / data / type / machine)
 var code_sp [1] = { 0x53,0x00, 0x50,0x00, 0x20,0x00, 0x20,0x00 };    # "SP  "  SetPosition
-var code_pt [1] = { 0x50,0x00, 0x54,0x00, 0x20,0x00, 0x20,0x00 };    # "PT  "  program-header type != PT_LOAD
+var code_pt [1] = { 0x50,0x00, 0x54,0x00, 0x20,0x00, 0x20,0x00 };    # "PT  "  no PT_LOAD segment in the program-header table
+# v0.7.0 hardening codes (audit 2026-08-29 F1/F3/F4). Distinct codes matter
+# disproportionately here: iron has no serial cable, so this 4-char string is
+# the ENTIRE diagnostic channel for a kernel that won't load.
+var code_gi [1] = { 0x47,0x00, 0x49,0x00, 0x20,0x00, 0x20,0x00 };    # "GI  "  GetInfo(\boot\agnos) — cannot size the file
+var code_phn[1] = { 0x50,0x00, 0x48,0x00, 0x4E,0x00, 0x20,0x00 };    # "PHN "  e_phoff / e_phnum / e_phentsize out of range
+var code_sz [1] = { 0x53,0x00, 0x5A,0x00, 0x20,0x00, 0x20,0x00 };    # "SZ  "  segment bounds reject (filesz>memsz, past EOF, over cap, misaligned)
+var code_shr[1] = { 0x53,0x00, 0x48,0x00, 0x52,0x00, 0x20,0x00 };    # "SHR "  short read — firmware transferred fewer bytes than asked
 var code_ap [1] = { 0x41,0x00, 0x50,0x00, 0x20,0x00, 0x20,0x00 };    # "AP  "  AllocatePages
 var code_ld [1] = { 0x4C,0x00, 0x44,0x00, 0x20,0x00, 0x20,0x00 };    # "LD  "  segment Read
 var code_vfy[1] = { 0x56,0x00, 0x46,0x00, 0x59,0x00, 0x20,0x00 };    # "VFY "  post-load ELF magic re-check
@@ -162,7 +169,12 @@ var acpi10_guid[2] = {
 #   0x00  u32   magic            = 0x41474E4F ('AGNO')
 #   0x04  u32   version          = 2 (bumped: inlined fb fields)
 #   0x08  u32   struct_size      = 120 (0x78)
-#   0x0C  u32   flags            (bit 0=serial, bit 1=fb_present)
+#   0x0C  u32   flags            (bit 0=serial, bit 1=fb_present,
+#                                  bit 2=kaslr_no_entropy — v0.7.0: RDRAND
+#                                  failed, so kernel_base at 0x70 is the
+#                                  DETERMINISTIC fallback, not a slide.
+#                                  Set with read-modify-write OR, never a
+#                                  bare store: the bits are independent.)
 #   0x10  u64   initramfs_phys   (v0.5.0: \boot\initramfs base; 0 if absent)
 #   0x18  u64   initramfs_size   (v0.5.0: initramfs byte count; 0 if absent)
 #   0x20  u64   cmdline_phys     (v0.5.0: \boot\cmdline base; 0 if absent)
@@ -188,7 +200,22 @@ var acpi10_guid[2] = {
 #                                 kernel uses this for WC remap range
 #                                 in preference to pitch*height when
 #                                 non-zero.)
-#   0x70  tag[] type=0 END terminator (size=0 ok; walker stops at type==0)
+#   0x70  u64   kernel_base      (v0.6.0: the load base actually chosen —
+#                                 the KASLR slide for ET_DYN, or min p_paddr
+#                                 for ET_EXEC. Read with flags bit 2 to know
+#                                 whether it was randomized or fell back.)
+#
+# ⚠ THERE IS NO TAG STREAM AND NO END TERMINATOR — this is a FLAT 120-byte
+# struct. Until v0.6.0 the last 8 bytes were documented (and zero-filled) as a
+# type=0 END tag; the v0.6.0 kernel_base store at 0x70 overwrote it, so a
+# consumer walking tags from 0x70 would read type=low32(kernel_base) with
+# size=0 and spin or run off the end. Nothing shipped walks tags — agnos reads
+# fixed offsets only — but the comment claimed a terminator that had not
+# existed for two releases (audit 2026-08-29 finding F5). Recorded here as
+# fact; the *decision* about whether boot_info ever grows a real tag stream
+# belongs to the M4 handoff-protocol spec, which is blocked on exactly this.
+# Every field above is at a FIXED offset. struct_size (0x08) = 120 = the whole
+# thing. Do not add a walker.
 #
 # fb_mode_current + fb_mode_max overlay the previously-reserved u64 at
 # 0x60. Reserved-slot overlay (not a version bump) because v2 readers
@@ -216,16 +243,37 @@ var boot_info[15] = {
     0x00, 0x00, 0x00, 0x00
 };
 
-# RDRAND entropy for KASLR (agnos 1.47.3). Single `rdrand rcx` → out. On the rare CF=0 failure rcx
-# is 0 (the slide falls to slot 0 = 32 MB, still a valid base); QEMU `-cpu max` and AMD Zen both
-# advertise RDRAND, so this is reliable on the supported targets. Kept minimal — gnoboot has no stdlib.
+# RDRAND entropy for KASLR (agnos 1.47.3). Retries up to 10x on CF=0 per Intel's
+# DRNG guidance, then gives up and reports the failure through g_rdrand_fail.
+#
+# v0.7.0 (audit 2026-08-29 finding F6). The previous version issued ONE `rdrand`
+# and ignored CF. On failure rcx is architecturally 0, and because efi_main's
+# 16x re-roll loop calls this same failing instruction every time, all 16 rolls
+# returned the SAME value — so the kernel loaded at a fixed 32 MB and reported a
+# kernel_base that is a perfectly legal slide value. KASLR failed OPEN and
+# SILENTLY: benign for booting, total for the security property, and
+# indistinguishable at the kernel from a successful randomization. The retry
+# makes exhaustion vanishingly unlikely; g_rdrand_fail makes it VISIBLE when it
+# happens (→ boot_info flags bit 2), which is the part that actually matters.
+#
+# Register note: this fn contains inline asm, so cyrius skips register
+# allocation for it — the `var pout = &out;` lea-into-rax idiom is what keeps
+# rax live across the block. r8 is the retry counter: caller-saved in both
+# SysV and MS x64, and untouched by this fn's own prologue/epilogue.
+# Re-verify by disassembly after any toolchain bump (see state.md § Source).
 fn rdrand_u64() {
     var out = 0;
     var pout = &out;                    # rax = &out (gnoboot's lea-into-rax idiom)
     asm {
-        0x48; 0x0F; 0xC7; 0xF1;         # rdrand rcx
-        0x48; 0x89; 0x08;               # mov [rax], rcx   (rax = &out)
+        0x49; 0xC7; 0xC0; 0x0A; 0x00; 0x00; 0x00;   # mov r8, 10        (attempts)
+        0x48; 0x0F; 0xC7; 0xF1;                     # retry: rdrand rcx
+        0x72; 0x08;                                 # jc done           (CF=1 → rcx valid)
+        0x49; 0xFF; 0xC8;                           # dec r8
+        0x75; 0xF5;                                 # jnz retry
+        0x48; 0x31; 0xC9;                           # xor rcx, rcx      (exhausted → 0)
+        0x48; 0x89; 0x08;                           # done: mov [rax], rcx
     }
+    if (out == 0) { store64(&g_rdrand_fail, 1); }   # 10x CF=0, or a true 0 draw
     return out;
 }
 
@@ -239,7 +287,14 @@ var gop_out[1];
 var read_sz[1];
 var alloc_addr[1];
 var elf_hdr[8];
-var phdr[7];
+# v0.7.0: the whole program-header table is read once into memory and iterated
+# there, instead of the old single 56-byte phdr read. Two reasons: it removes a
+# second SetPosition/Read round trip per segment, and it means the file-bounds
+# check happens ONCE, before any header field is trusted. 16 x 56 = 896 bytes;
+# PH_MAX=16 is enforced at parse time, so this buffer cannot be overrun.
+var phdrs[112];
+var kfile_sz[1];          # \boot\agnos size from GetInfo — the bound for every p_offset/p_filesz
+var g_rdrand_fail[1];     # set by rdrand_u64 when RDRAND gave up → boot_info flags bit 2
 var mm_buf[2048];
 var mm_size[1];
 var mm_key[1];
@@ -402,100 +457,278 @@ fn efi_main(handle, st): i64 {
     var fn_read   = load64(file + 0x20);
     var fn_setpos = load64(file + 0x38);
 
-    # --- 5-7: Parse ELF + first program header ---
+    # ================================================================
+    # Steps 5-10: load the kernel.  REWRITTEN AT v0.7.0 — "ELF-load
+    # hardening", scoped by docs/audit/2026-08-29-audit.md (F1-F4).
+    #
+    # What this block used to do: check ONE byte of ELF magic, read ONE
+    # program header, trust every u64 in it, and Read without checking
+    # how many bytes actually arrived.  The published threat model in
+    # SECURITY.md claimed "oversized program-header counts, malformed
+    # PT_LOAD entries — bounds-checked at parse time"; none of that was
+    # true.  It is now.
+    #
+    # The realistic trigger is not an attacker — anyone who can write
+    # \boot\agnos can just supply a valid kernel, which SECURITY.md
+    # accepts.  It is a TRUNCATED kernel: an interrupted dd, a bad USB
+    # write, a failed ISO build.  Before v0.7.0 that booted into
+    # whatever AllocatePages happened to return (UEFI 2.x §7.2:
+    # "undefined") and triple-faulted with no console.  Now it prints a
+    # 4-char code before EBS, which is the whole point of the design.
+    #
+    # The model for all of it is load_esp_blob(), which has done
+    # GetInfo-sizing and short-read checking since v0.5.0.  The
+    # *optional* initramfs path was strictly safer than the *mandatory*
+    # kernel path for two releases.
+    # ================================================================
+
+    # --- 5: Size the file (audit F4) --------------------------------
+    # Every offset and length parsed below is bounds-checked against
+    # this.  finfo / finfo_sz are load_esp_blob's scratch globals;
+    # sharing them is safe because that helper does not run until step
+    # 10d and nothing between here and there reads them.  KEEP THAT
+    # ORDERING if this block ever moves.
+    var fn_getinfo = load64(file + 0x40);
+    store64(&finfo_sz, 256);
+    rc = fncall4(fn_getinfo, file, &file_info_guid, &finfo_sz, &finfo);
+    if (rc != 0) { efi_fail(st, &code_gi); return 0; }
+    var ksz = load64(&finfo + 0x08);
+    # `< 64` is the whole check: it rejects both a file too small to hold an
+    # ELF header AND a firmware-reported size with the high bit set (which
+    # reads back negative as i64), so every later `ksz - x` is safe.
+    if (ksz < 64) { efi_fail(st, &code_gi); return 0; }
+    store64(&kfile_sz, ksz);
+
+    # --- 6: Read + gate on the ELF64 identity (audit F1) ------------
+    # This is a GATE, not a sanity check.  Everything after it trusts
+    # e_phoff to drive SetPosition and the program headers to drive
+    # AllocatePages and Read.  The post-load magic re-check at step 10a
+    # is a backstop that fires only AFTER the allocation and the copy —
+    # it cannot protect the allocation itself.
     store64(&read_sz, 64);
     rc = fncall3(fn_read, file, &read_sz, &elf_hdr);
     if (rc != 0) { efi_fail(st, &code_rd); return 0; }
-    if (load8(&elf_hdr + 0) != 0x7F) { efi_fail(st, &code_elf); return 0; }
+    if (load64(&read_sz) < 64) { efi_fail(st, &code_shr); return 0; }
 
-    var e_phoff = load64(&elf_hdr + 0x20);
+    if (load8(&elf_hdr + 0) != 0x7F) { efi_fail(st, &code_elf); return 0; }   # \x7F
+    if (load8(&elf_hdr + 1) != 0x45) { efi_fail(st, &code_elf); return 0; }   # 'E'
+    if (load8(&elf_hdr + 2) != 0x4C) { efi_fail(st, &code_elf); return 0; }   # 'L'
+    if (load8(&elf_hdr + 3) != 0x46) { efi_fail(st, &code_elf); return 0; }   # 'F'
+    if (load8(&elf_hdr + 4) != 2)    { efi_fail(st, &code_elf); return 0; }   # EI_CLASS = ELFCLASS64
+    if (load8(&elf_hdr + 5) != 1)    { efi_fail(st, &code_elf); return 0; }   # EI_DATA  = ELFDATA2LSB
+
+    # e_type is a u16 at +16.  The pre-v0.7.0 code read it with load8,
+    # which happened to work little-endian for values < 256 but would
+    # have accepted e.g. 0x0102 as ET_EXEC.  Read the full halfword.
+    var e_type = load16(&elf_hdr + 16);
+    var ty_ok = 0;
+    if (e_type == 2) { ty_ok = 1; }                        # ET_EXEC — fixed kernel
+    if (e_type == 3) { ty_ok = 1; }                        # ET_DYN  — PIE kernel (KASLR)
+    if (ty_ok == 0) { efi_fail(st, &code_elf); return 0; }
+    if (load16(&elf_hdr + 18) != 0x3E) { efi_fail(st, &code_elf); return 0; }  # EM_X86_64
+
+    var e_entry     = load64(&elf_hdr + 24);
+    var e_phoff     = load64(&elf_hdr + 0x20);
+    var e_phentsize = load16(&elf_hdr + 0x36);
+    var e_phnum     = load16(&elf_hdr + 0x38);
+
+    # --- 7: Bound the program-header table, then read it whole ------
+    # PH_MAX = 16.  phdrs[112] is 896 bytes = 16 x 56 exactly, so this
+    # cap is what makes the buffer un-overrunnable.  REJECT rather than
+    # clamp: silently looking at the first 16 of 20 headers could skip
+    # a PT_LOAD and under-load the kernel, which is the failure mode
+    # F2 exists to kill.
+    if (e_phentsize != 56) { efi_fail(st, &code_phn); return 0; }
+    if (e_phnum < 1)       { efi_fail(st, &code_phn); return 0; }
+    if (e_phnum > 16)      { efi_fail(st, &code_phn); return 0; }
+    if (e_phoff < 64)      { efi_fail(st, &code_phn); return 0; }  # would overlap the ELF header
+    if (e_phoff > ksz)     { efi_fail(st, &code_phn); return 0; }
+    var ph_bytes = e_phnum * 56;
+    # Written as a subtraction, not `e_phoff + ph_bytes > ksz`: e_phoff
+    # is an unchecked u64 and the addition could wrap.  e_phoff <= ksz
+    # is already established, so ksz - e_phoff cannot go negative.
+    if (ph_bytes > ksz - e_phoff) { efi_fail(st, &code_phn); return 0; }
 
     rc = fncall2(fn_setpos, file, e_phoff);
     if (rc != 0) { efi_fail(st, &code_sp); return 0; }
-
-    store64(&read_sz, 56);
-    rc = fncall3(fn_read, file, &read_sz, &phdr);
+    store64(&read_sz, ph_bytes);
+    rc = fncall3(fn_read, file, &read_sz, &phdrs);
     if (rc != 0) { efi_fail(st, &code_rd); return 0; }
-    if (load8(&phdr + 0) != 1) { efi_fail(st, &code_pt); return 0; }
+    if (load64(&read_sz) < ph_bytes) { efi_fail(st, &code_shr); return 0; }
 
-    var p_offset = load64(&phdr +  8);
-    var p_paddr  = load64(&phdr + 24);
-    var p_filesz = load64(&phdr + 32);
-    var p_memsz  = load64(&phdr + 40);
+    # --- 8: Validate every PT_LOAD and measure the image (F2 + F4) --
+    # Pass 1 of 2.  Nothing is allocated or copied until every segment
+    # has passed, so a malformed header rejects before any firmware
+    # state changes.
+    #
+    # k_cap = 256 MB is not arbitrary: it is the kernel's own per-proc
+    # CR3 identity extent (agnos proc.cyr copies PD[0..127]), the same
+    # ceiling the KASLR window is chosen under.  A kernel image that
+    # does not fit below it cannot be booted by this loader anyway, so
+    # rejecting here is honest rather than merely defensive — and it is
+    # what makes the page arithmetic below provably wrap-free.
+    var k_cap = 0x10000000;
+    var nload = 0;
+    var lo = 0;
+    var hi = 0;
+    var i = 0;
+    while (i < e_phnum) {
+        var ph = &phdrs + i * 56;
+        if (load32(ph + 0) == 1) {                         # PT_LOAD
+            var s_off = load64(ph +  8);
+            var s_pa  = load64(ph + 24);
+            var s_fsz = load64(ph + 32);
+            var s_msz = load64(ph + 40);
+            # Every one of these was unchecked before v0.7.0.
+            if (s_pa  < 0)     { efi_fail(st, &code_sz); return 0; }
+            if (s_pa  > k_cap) { efi_fail(st, &code_sz); return 0; }
+            if (s_msz < 0)     { efi_fail(st, &code_sz); return 0; }
+            if (s_msz > k_cap) { efi_fail(st, &code_sz); return 0; }
+            if (s_fsz < 0)     { efi_fail(st, &code_sz); return 0; }
+            # filesz > memsz is the copy-overrun case: pages are sized
+            # from memsz, then filesz bytes get Read into them.
+            if (s_fsz > s_msz) { efi_fail(st, &code_sz); return 0; }
+            if (s_off < 0)     { efi_fail(st, &code_sz); return 0; }
+            if (s_off > ksz)   { efi_fail(st, &code_sz); return 0; }
+            if (s_fsz > ksz - s_off) { efi_fail(st, &code_sz); return 0; }   # segment runs past EOF
+            if (s_msz > 0) {
+                var s_end = s_pa + s_msz;                  # both bounded by k_cap — cannot wrap
+                if (nload == 0) { lo = s_pa; hi = s_end; }
+                if (s_pa  < lo) { lo = s_pa; }
+                if (s_end > hi) { hi = s_end; }
+                nload = nload + 1;
+            }
+        }
+        i = i + 1;
+    }
+    if (nload == 0) { efi_fail(st, &code_pt); return 0; }
 
-    # agnos 1.47.3 KASLR: ET_DYN (e_type=3) is the PIE kernel (links at base 0, p_paddr=0, base-relative
-    # e_entry 0xA8); ET_EXEC (2) is the legacy fixed kernel (absolute e_entry 0x1000A8). The load base
-    # and entry jump target are chosen at the AllocatePages step below (ET_DYN gets an RDRAND slide).
-    var e_type  = load8(&elf_hdr + 16);
-    var e_entry = load64(&elf_hdr + 24);
-    var kernel_jump_target = e_entry;
+    # One contiguous allocation spanning every PT_LOAD, so the relative
+    # offsets between segments survive a KASLR slide unchanged.
+    var lo_pg = lo - (lo % 0x1000);
+    var span  = hi - lo_pg;
+    if (span > k_cap) { efi_fail(st, &code_sz); return 0; }
+    var pages = (span + 0xFFF) / 0x1000;                   # span <= 256 MB — no wrap
 
-    # --- 8-10: AllocatePages + load segment ---
+    # --- 9: Allocate ------------------------------------------------
     # MemoryType arg = 1 (EfiLoaderCode), NOT 2 (EfiLoaderData). Modern
     # AMD UEFI firmware may NX-mark LoaderData pages under strict W^X
-    # — jumping to 0x1000A8 in a LoaderData page triple-faults silently
-    # on iron while OVMF (lenient W^X for data execution) lets it run.
+    # — jumping into a LoaderData page triple-faults silently on iron
+    # while OVMF (lenient W^X for data execution) lets it run.
     # LoaderCode signals "this is executable" and firmware leaves NX
     # clear in the live page tables we inherit post-EBS.
-    var pages = (p_memsz + 0xFFF) / 0x1000;
+    var load_base = lo_pg;
+    var kernel_jump_target = e_entry;
     if (e_type == 3) {
-        # KASLR bite 2b: the PIE kernel links at base 0 — slide it to an RDRAND-chosen, 2 MB-aligned
-        # base in [32 MB, 254 MB): above the kernel's fixed 0..18 MB scratch + 16 MB PMM ceiling, and
-        # below the 256 MB per-proc-CR3 identity extent (proc.cyr copies PD[0..127]). AllocatePages at
-        # that exact base; if the firmware has it reserved, re-roll up to 16x, then fall back to the
-        # fixed 0x100000 (still correct — the kernel is RIP-relative). 111 slots ≈ 6.8 bits of slide.
+        # KASLR: the PIE kernel links at base 0, so slide the whole span
+        # to an RDRAND-chosen, 2 MB-aligned base in [32 MB, 254 MB):
+        # above the kernel's fixed 0..18 MB scratch + 16 MB PMM ceiling,
+        # and below the 256 MB per-proc-CR3 identity extent. 111 slots
+        # ~ 6.8 bits of slide. If the firmware has a base reserved,
+        # re-roll up to 16x, then fall back to the fixed 0x100000
+        # (still correct — the kernel is RIP-relative).
         var ksl_ok = 0;
         var ksl_try = 0;
         while (ksl_try < 16) {
-            var ksl_r = rdrand_u64();
-            if (ksl_r < 0) { ksl_r = 0 - ksl_r; }
-            p_paddr = 0x2000000 + (ksl_r % 111) * 0x200000;
-            store64(&alloc_addr, p_paddr);
+            # Audit F7: MASK the sign bit, do not negate. `0 - x` is the
+            # identity on i64::MIN, so the old `if (r < 0) r = 0 - r;`
+            # left it negative, and cyrius `%` is C-truncated — the
+            # slide would have landed BELOW the 32 MB floor. Verified
+            # empirically against the pinned toolchain, not assumed.
+            var ksl_r = rdrand_u64() & 0x7FFFFFFFFFFFFFFF;
+            load_base = 0x2000000 + (ksl_r % 111) * 0x200000;
+            store64(&alloc_addr, load_base);
             if (fncall4(fn_alloc, 2, 1, pages, &alloc_addr) == 0) { ksl_ok = 1; ksl_try = 16; }
             else { ksl_try = ksl_try + 1; }
         }
         if (ksl_ok == 0) {
-            p_paddr = 0x100000;
-            store64(&alloc_addr, p_paddr);
+            load_base = 0x100000;
+            store64(&alloc_addr, load_base);
             if (fncall4(fn_alloc, 2, 1, pages, &alloc_addr) != 0) { efi_fail(st, &code_ap); return 0; }
         }
-        kernel_jump_target = p_paddr + e_entry;     # PIE: the entry slides with the base
+        kernel_jump_target = load_base + (e_entry - lo_pg);  # PIE: entry slides with the base
     } else {
-        store64(&alloc_addr, p_paddr);
+        # ET_EXEC: the image declares where it lives. AllocatePages with
+        # AllocateAddress is what enforces that the range is actually
+        # free — gnoboot delegates that check to the firmware rather
+        # than duplicating its allocator state (audit F5-adjacent; a
+        # non-free range returns non-zero and we fail clean at "AP").
+        store64(&alloc_addr, load_base);
         rc = fncall4(fn_alloc, 2, 1, pages, &alloc_addr);
         if (rc != 0) { efi_fail(st, &code_ap); return 0; }
     }
-    # KASLR: expose the chosen kernel load base to the kernel at boot_info+0x70 (the unused END-tag
-    # slot — no consumer walks tags). The kernel reports it as the `KASLR: kernel_base` slide probe.
-    store64(&boot_info + 0x70, p_paddr);
 
-    rc = fncall2(fn_setpos, file, p_offset);
-    if (rc != 0) { efi_fail(st, &code_sp); return 0; }
+    # Expose the chosen base at boot_info+0x70 (the kernel reports it as
+    # the `KASLR: kernel_base` slide probe), and — new at v0.7.0 — say
+    # out loud when it is NOT randomized. RDRAND failing used to leave a
+    # fixed 32 MB base that looked exactly like a successful slide.
+    store64(&boot_info + 0x70, load_base);
+    if (load64(&g_rdrand_fail) != 0) {
+        store32(&boot_info + 0x0C, load32(&boot_info + 0x0C) | 0x04);   # flags.kaslr_no_entropy
+    }
 
-    store64(&read_sz, p_filesz);
-    rc = fncall3(fn_read, file, &read_sz, p_paddr);
-    if (rc != 0) { efi_fail(st, &code_ld); return 0; }
+    # --- 10: Copy each PT_LOAD into place, zero each BSS gap --------
+    # Pass 2 of 2. Every segment, not just the first — that is the M5
+    # work, and it is a correctness fix rather than a feature: a kernel
+    # linked with a separate RX-text / RW-data split used to be
+    # SILENTLY under-loaded (only phdr[0] was ever read), and a kernel
+    # whose first program header was PT_PHDR failed outright at "PT".
+    var hdr_dst = 0;
+    var hdr_seen = 0;
+    i = 0;
+    while (i < e_phnum) {
+        var ph2 = &phdrs + i * 56;
+        if (load32(ph2 + 0) == 1) {
+            var d_msz = load64(ph2 + 40);
+            if (d_msz > 0) {
+                var d_off = load64(ph2 +  8);
+                var d_pa  = load64(ph2 + 24);
+                var d_fsz = load64(ph2 + 32);
+                var dst   = load_base + (d_pa - lo_pg);
+                if (d_fsz > 0) {
+                    rc = fncall2(fn_setpos, file, d_off);
+                    if (rc != 0) { efi_fail(st, &code_sp); return 0; }
+                    store64(&read_sz, d_fsz);
+                    rc = fncall3(fn_read, file, &read_sz, dst);
+                    if (rc != 0) { efi_fail(st, &code_ld); return 0; }
+                    # Audit F3. UEFI 2.10 §13.5.1: Read rewrites
+                    # BufferSize to bytes ACTUALLY transferred and still
+                    # returns EFI_SUCCESS. Without this a truncated
+                    # kernel loaded "successfully" and the unread tail
+                    # kept whatever AllocatePages returned — undefined
+                    # per UEFI 2.x §7.2 — and gnoboot jumped into it.
+                    if (load64(&read_sz) < d_fsz) { efi_fail(st, &code_shr); return 0; }
+                    if (d_off == 0) { if (d_fsz > 3) { hdr_dst = dst; hdr_seen = 1; } }
+                }
+                # Zero [filesz, memsz). ELF semantics require it and
+                # AllocatePages does NOT guarantee zeroed memory (UEFI
+                # 2.x §7.2). QEMU OVMF tends to hand back zeroes, which
+                # masked this through Step 7; real firmware leaves POST
+                # scratch there and kernel .bss globals read garbage.
+                # Byte loop: microseconds at ~64 KB, and gnoboot keeps
+                # zero stdlib deps so there is no memset to call.
+                var bss_i = dst + d_fsz;
+                var bss_e = dst + d_msz;
+                while (bss_i < bss_e) {
+                    store8(bss_i, 0);
+                    bss_i = bss_i + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
 
-    if (load8(p_paddr + 0) != 0x7F) { efi_fail(st, &code_vfy); return 0; }
-    if (load8(p_paddr + 1) != 0x45) { efi_fail(st, &code_vfy); return 0; }
-    if (load8(p_paddr + 2) != 0x4C) { efi_fail(st, &code_vfy); return 0; }
-    if (load8(p_paddr + 3) != 0x46) { efi_fail(st, &code_vfy); return 0; }
-
-    # --- 10b: Zero BSS gap [p_filesz, p_memsz). ELF semantics require
-    # [end-of-file-image, end-of-memory-image) to be zero; UEFI
-    # AllocatePages does NOT guarantee zeroed memory (UEFI 2.x § 7.2:
-    # "the memory returned ... is undefined"). QEMU OVMF tends to return
-    # zero on fresh allocations — that masked the bug through Step 7
-    # QEMU PASS — but real firmware leaves POST/EFI scratch in those
-    # pages, so kernel globals in .bss read garbage and triple-fault
-    # at first reference. Byte-loop over the gap is microseconds at
-    # ~64 KB and avoids needing stdlib memset (gnoboot keeps zero
-    # stdlib deps; see cyrius.cyml).
-    var bss_i = p_paddr + p_filesz;
-    var bss_e = p_paddr + p_memsz;
-    while (bss_i < bss_e) {
-        store8(bss_i, 0);
-        bss_i = bss_i + 1;
+    # --- 10a: Post-load re-verify (M7's defensive re-check) ---------
+    # Only meaningful if some PT_LOAD actually covers file offset 0, so
+    # that the ELF header is part of the loaded image. Conditional
+    # rather than assumed: the pre-v0.7.0 code checked unconditionally
+    # at p_paddr, which is only the header's address when the single
+    # segment happens to start at file offset 0.
+    if (hdr_seen == 1) {
+        if (load8(hdr_dst + 0) != 0x7F) { efi_fail(st, &code_vfy); return 0; }
+        if (load8(hdr_dst + 1) != 0x45) { efi_fail(st, &code_vfy); return 0; }
+        if (load8(hdr_dst + 2) != 0x4C) { efi_fail(st, &code_vfy); return 0; }
+        if (load8(hdr_dst + 3) != 0x46) { efi_fail(st, &code_vfy); return 0; }
     }
 
     # --- 10c: Locate GOP and capture framebuffer mode into boot_info ---
@@ -568,8 +801,18 @@ fn efi_main(handle, st): i64 {
         var qm_inf = 0;
         var best_mode = cur_mode;
         var best_px = 0;
+        # v0.7.0 (audit F9): bound the enumeration. MaxMode is a firmware
+        # u32 and load32 zero-extends (verified empirically), so a
+        # firmware reporting 0xFFFFFFFF would have spun ~4e9 QueryMode
+        # calls pre-EBS with no way out. The ACPI config-table walk below
+        # has capped its count at 256 since v0.5.0; this is the same
+        # treatment for the other firmware-supplied count. `max_mode`
+        # itself stays untouched so boot_info+0x64 keeps reporting what
+        # the firmware actually claimed.
+        var qm_n = max_mode;
+        if (qm_n > 256) { qm_n = 256; }
         var mi = 0;
-        while (mi < max_mode) {
+        while (mi < qm_n) {
             qm_sz = 0;
             qm_inf = 0;
             if (fncall4(fn_querymode, gop_p, mi, &qm_sz, &qm_inf) == 0) {
@@ -619,7 +862,11 @@ fn efi_main(handle, st): i64 {
         store32(&boot_info + 0x60, cur_mode);  # GOP mode # firmware booted
         store32(&boot_info + 0x64, max_mode);  # GOP mode count available
         store64(&boot_info + 0x68, fb_size);   # FrameBufferSize
-        store32(&boot_info + 0x0C, 0x02);      # flags.fb_present = 1
+        # OR, not a bare store: bit 2 (kaslr_no_entropy) may already be
+        # set by the KASLR step above, and a bare store would silently
+        # clear it. The old code got away with it only because nothing
+        # else wrote flags.
+        store32(&boot_info + 0x0C, load32(&boot_info + 0x0C) | 0x02);   # flags.fb_present = 1
     }
 
     # --- 10d-f: Optional boot_info feature-fills (v0.5.0) --------------
@@ -666,6 +913,9 @@ fn efi_main(handle, st): i64 {
     var nents  = load64(st + 0x68);
     var ctab   = load64(st + 0x70);
     if (nents > 256) { nents = 256; }                # bound a malformed count
+    if (nents < 0)   { nents = 0; }                  # u64 > i64 max — treat as absent
+    if (ctab == 0)   { nents = 0; }                  # v0.7.0 (audit F9): null table with a
+                                                     # non-zero count would walk from address 0
     var rsdp   = 0;
     var rsdp10 = 0;
     var ti = 0;
@@ -705,6 +955,10 @@ fn efi_main(handle, st): i64 {
 
     var sz  = load64(&mm_size);
     var dsz = load64(&mm_dsz);
+    # v0.7.0 (audit F9): DescriptorSize is firmware-supplied and divides
+    # sz on the next line. Zero would fault here — pre-EBS, so failing
+    # loud at "MM" is both possible and correct.
+    if (dsz < 1) { efi_fail(st, &code_mm); return 0; }
     store32(&boot_info + 0x30, sz / dsz);              # memmap_count
     store32(&boot_info + 0x34, dsz);                   # memmap_entsize
 

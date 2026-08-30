@@ -23,7 +23,13 @@ spinoffs) can depend on a stable boot ABI.
 - [ ] **Public API frozen** — every exposed symbol documented, no
       breaking changes accepted post-v1.0.
 - [ ] **Test coverage adequate** — structural + OVMF gates green
-      across the cyrius pin range used in CI.
+      across the cyrius pin range used in CI. **Materially advanced at
+      v0.7.0**: `tests/malformed_kernel.sh` (18 malformed kernels, each
+      asserting its specific pre-EBS failure code) and
+      `tests/multi_ptload.sh` (multi-segment equivalence) mean the
+      hardening is exercised rather than merely written. Still open: the
+      **ET_DYN / KASLR path is not runtime-tested** (agnos links ET_EXEC),
+      and `src/test.cyr` still does not build.
 - [ ] **CHANGELOG complete from v0.1.0 onward** — every release
       entry has a Breaking/Added/Changed/Fixed split where applicable.
 - [x] **Security audit pass** — ✅ **first pass landed 2026-08-29**:
@@ -150,7 +156,7 @@ layout (so the spec documents the as-shipped struct, not a moving target).
 > drop the tag-stream concept, or grow it to 128 bytes and restore an END at
 > `0x78`. **That call is M4's first task, not its last.**
 
-### M5 — multi-PT_LOAD support — **re-slotted into v0.7.0, merged with M7**
+### M5 — multi-PT_LOAD support — ✅ SHIPPED at v0.7.0 (merged with M7)
 
 > **Re-scoped by the 2026-08-29 audit** ([`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md),
 > finding **F2**). The version label `v0.6.0` is stale — that slot went to the
@@ -176,13 +182,26 @@ deliver that too if a Linux variant ever wants to consume our handoff).
 > zeroed memory (UEFI 2.x §7.2) — audit S6, verified sound. What v0.7.0 adds is
 > doing it **per segment** rather than for the single assumed one.
 
-### v0.7.0 — ELF-load hardening (M5 + M7 merged) — **next cut**
+### v0.7.0 — ELF-load hardening (M5 + M7 merged) — ✅ shipped 2026-08-29
 
-> **Scoped by the 2026-08-29 audit.** The audit did not produce a work list
-> parallel to this roadmap — it produced the same list, better ordered. Every
-> item below is an audit finding; severities are per `SECURITY.md`'s rubric.
-> Full detail, including the verified-sound paths that need no change, is in
+> **Scoped by the 2026-08-29 audit, shipped the same day.** The audit did not
+> produce a work list parallel to this roadmap — it produced the same list,
+> better ordered. Every item below is an audit finding; severities are per
+> `SECURITY.md`'s rubric. Full detail, including the verified-sound paths that
+> needed no change, is in
 > [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md).
+>
+> **All nine items below landed.** The release is gated by two new tests —
+> `tests/malformed_kernel.sh` (18 corrupted kernels booted under OVMF, each
+> asserting its specific failure code) and `tests/multi_ptload.sh` (the real
+> kernel's `PT_LOAD` split in two, proven to boot equivalently). **Not an ABI
+> change**: only an additive `flags` bit 2.
+>
+> **Carried forward**: audit **F8** (the 16 KB memmap buffer cannot grow — safe
+> but brittle; the sizing `AllocatePages` must precede the final
+> `GetMemoryMap`), and the **F5 decision** (flat struct vs. real tag stream),
+> which is M4's first task. Also owed: a **runtime run of the ET_DYN / KASLR
+> path**, which agnos's current ET_EXEC link leaves unexercised.
 
 The unifying observation: **`load_esp_blob` — the *optional* initramfs/cmdline
 path added at v0.5.0 — is already hardened the way the *mandatory* kernel path
@@ -218,12 +237,11 @@ load already does."
 9. **Reconcile `SECURITY.md`** in the same cut — its threat model currently claims
    bounds-checking that items 1–4 are what actually implement.
 
-Deferred from M7 to a later cut unless it proves cheap: the **memmap sanity** hook
-and the two-call `GetMemoryMap` sizing pattern (audit F8 — safe today, just
-brittle at >16 KB maps). Note the ordering constraint: the sizing `AllocatePages`
-must happen *before* the final `GetMemoryMap`, or it invalidates the map key.
-Also deferred: the **handoff struct self-consistency** hook, which cannot be
-written until M4 settles F5.
+**Deferred as planned**: the **memmap sanity** hook and the two-call
+`GetMemoryMap` sizing pattern (audit F8 — safe today, just brittle at >16 KB
+maps; the sizing `AllocatePages` must happen *before* the final `GetMemoryMap`
+or it invalidates the map key), and the **handoff struct self-consistency**
+hook, which cannot be written until M4 settles F5.
 
 ### M6 — verbose-serial diagnostic mode — **re-slot and re-scope before building**
 
@@ -243,7 +261,7 @@ contents (hex-dump) before EBS. Off by default (silent boot when
 disabled); on by default in `*.dev` builds. Costs ~1 KB binary
 size, ~2 sec boot-time when enabled.
 
-### M7 — boot-info validation hooks — **absorbed into v0.7.0 above**
+### M7 — boot-info validation hooks — ✅ two of three SHIPPED at v0.7.0
 
 > **Re-scoped by the 2026-08-29 audit.** Two of the three hooks below are audit
 > findings F1 and F4 and ship in v0.7.0. The third cannot be written yet — see

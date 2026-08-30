@@ -71,6 +71,25 @@ jobs:
         # installed it all, so SKIP would itself be a regression.
         run: sh tests/ovmf_smoke.sh
 
+      - name: Malformed-kernel gate (v0.7.0 hardening)
+        # Boots 18 deliberately-corrupted \boot\agnos images under OVMF
+        # and asserts each one fails to its specific 4-char code BEFORE
+        # ExitBootServices. Without this, every bounds check added at
+        # v0.7.0 is unexercised code, and an unexercised check is
+        # indistinguishable from an absent one — verify_pe.sh and
+        # ovmf_smoke.sh both test only the happy path.
+        #
+        # SKIPs when no real agnos ELF64 is available to mutate, which
+        # is the normal case on a runner with no agnos checkout. It is
+        # a local + release gate, not a per-push blocker.
+        run: sh tests/malformed_kernel.sh
+
+      - name: Multi-PT_LOAD gate (roadmap M5)
+        # Splits the real kernel's single PT_LOAD into two contiguous
+        # ones describing an identical memory layout, and asserts it
+        # boots equivalently. Same SKIP-without-agnos behaviour.
+        run: sh tests/multi_ptload.sh
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

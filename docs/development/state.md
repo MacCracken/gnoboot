@@ -3,11 +3,49 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md). No code changed; the audit is the scoping document for **v0.7.0 “ELF-load hardening”**, which merges roadmap M5 + M7 because they are the same code region. Headline: `SECURITY.md`’s “malformed kernel files … bounds-checked at parse time” claim does **not** hold — `e_phnum` is never read, no `PT_LOAD` field is bounds-checked, and the pre-load ELF check is one byte. 10 findings / 9 verified-sound. Gates re-run green at 0.6.2). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
+> **Last refresh**: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, the audit-scoped release: kernel-load bounds-checking against the file's actual size, short-read detection, **multi-`PT_LOAD` loading** (roadmap M5), KASLR that fails loudly instead of open, and bounded firmware counts. Closes audit findings F1–F4, F6, F7, F9; merges M5 + M7. **Not an ABI change** — only additive `flags` bit 2. Two new gates: `tests/malformed_kernel.sh` **18/18** and `tests/multi_ptload.sh` **PASS**. `SECURITY.md` reconciled. Awaiting user tag). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.6.2** — cut 2026-08-26, **tagged** (`0.6.2` → `741e935`). Toolchain **pin-bump
+**0.7.0** — cut 2026-08-29 (awaiting user tag). **ELF-load hardening** —
+the release the 2026-08-29 audit scoped. Closes findings F1–F4, F6, F7, F9
+and merges roadmap **M5** (multi-`PT_LOAD`) with **M7** (validation hooks),
+which the audit found to be the same twenty lines.
+
+**Not an ABI change.** Magic `'AGNO'`, struct version `2`, `struct_size 0x78`
+and `RDI = &boot_info` are untouched. The one handoff-visible addition is
+`flags` **bit 2 (`kaslr_no_entropy`)**, which is additive — a v2 reader that
+ignores it behaves exactly as before.
+
+What changed, in one line each:
+
+- **The ELF check is now a gate.** Was one byte (`0x7F`); anything past it drove
+  `AllocatePages` and `Read` from arbitrary u64s. Now: 4 magic bytes, `EI_CLASS`,
+  `EI_DATA`, `e_type`, `e_machine`, `e_phentsize` — all before `e_phoff` is used.
+- **All `PT_LOAD` segments load.** Was `phdr[0]` only, so a 2-segment kernel was
+  *silently under-loaded* and a `PT_PHDR`-first kernel failed outright. Now one
+  bounded read of the whole table, validate-everything-then-allocate, one
+  contiguous span allocation, per-segment copy + BSS zero.
+- **Short reads are caught.** UEFI 2.10 §13.5.1 permits a partial `Read` that
+  still returns `EFI_SUCCESS`; a truncated kernel used to load "successfully"
+  into undefined memory (UEFI 2.x §7.2) and get jumped into.
+- **Segment fields are bounded** against a `GetInfo`-derived file size, with a
+  256 MB cap (the kernel's own per-proc-CR3 identity ceiling) that makes the page
+  arithmetic provably wrap-free rather than merely defended.
+- **KASLR fails loudly.** `rdrand_u64` retries 10× on CF=0 and sets flags bit 2 on
+  exhaustion. Previously all 16 re-rolls called the same failing instruction and
+  returned the same value — a fixed base indistinguishable from a real slide.
+- **Firmware counts bounded consistently** — GOP `MaxMode`, null `ConfigurationTable`,
+  zero `DescriptorSize` (the ACPI walk already capped at 256).
+
+The thing worth knowing about this cut: **the hardening is tested, not asserted.**
+`tests/malformed_kernel.sh` boots 18 deliberately-corrupted kernels under OVMF and
+asserts each one's specific failure code (18/18); `tests/multi_ptload.sh` splits the
+real kernel's `PT_LOAD` in two and proves it boots equivalently. Before those, every
+new check was unexercised code — and the two existing gates would have stayed green
+through a regression that deleted any of them.
+
+Prior — **0.6.2** — cut 2026-08-26, **tagged** (`0.6.2` → `741e935`). Toolchain **pin-bump
 patch** release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr`
 re-vendored from the 6.5.35 stdlib snapshot, and the banner version
 string `v0.6.1` → `v0.6.2`. **No gnoboot source behavior change** beyond
@@ -107,7 +145,7 @@ snapshot into a deliberately one-file `lib/`.
 
 ## Binary
 
-- **`build/BOOTX64.EFI`**: 32,768 bytes (PE32+ EFI Application, x86_64,
+- **`build/BOOTX64.EFI`**: 37,376 bytes (PE32+ EFI Application, x86_64,
   subsystem 0x000A, `DllCharacteristics` 0x0140 = NX_COMPAT +
   DYNAMIC_BASE, `.reloc` populated).
 - Since cyrius 6.5.17 the `fncallN` call sequences are **emitted inline**
@@ -133,9 +171,10 @@ snapshot into a deliberately one-file `lib/`.
 
 ## Source
 
-- `src/main.cyr` — single file, 740 lines. UTF-16LE message constants
-  (one `msg_pre` banner + one shared `msg_fail` template + 13
-  per-stage `code_*` codes), EFI GUIDs (LoadedImage + SimpleFileSystem
+- `src/main.cyr` — single file, ~975 lines (740 before the v0.7.0
+  hardening). UTF-16LE message constants (one `msg_pre` banner + one
+  shared `msg_fail` template + **17** per-stage `code_*` codes — v0.7.0
+  added `GI` / `PHN` / `SZ` / `SHR`), EFI GUIDs (LoadedImage + SimpleFileSystem
   + GraphicsOutput + FileInfo + ACPI 2.0/1.0), helpers `efi_print` /
   `efi_clear` / `efi_fail` / `load_esp_blob` / `guid_eq` / `rdrand_u64`,
   entry `fn efi_main(handle, st)`. Entry trampoline auto-emitted by cyrius.
@@ -144,11 +183,17 @@ snapshot into a deliberately one-file `lib/`.
   asm, which is what keeps them stable — both `efi_main` and `rdrand_u64`
   qualify. Re-verify by disassembly after any toolchain bump:
     - `rdrand_u64`: `var pout = &out;` must leave `&out` in RAX
-      (`lea rax,[rbp-0x8]`) before the `rdrand rcx` / `mov [rax], rcx` block.
+      (`lea rax,[rbp-0x8]`) before the block. **v0.7.0 replaced the single
+      `rdrand` with a 10× retry loop** (`mov r8,0xa` / `rdrand rcx` / `jb` /
+      `dec r8` / `jne` / `xor rcx,rcx` / `mov [rax],rcx`) — re-disassembled at
+      the cut, the lea-into-rax idiom holds across it and `r8` (caller-saved
+      in both ABIs) is untouched by the fn's own prologue/epilogue.
     - `efi_main` tail: `var p = &boot_info;` → `movabs rax, &boot_info`,
       then asm `mov rdi, rax`, then `var jt = kernel_jump_target;` must be
       a plain `mov rax,[rbp-N]` that **does not touch RDI**, then asm
-      `jmp rax`. Confirmed at the v0.6.2 cut under 6.5.35.
+      `jmp rax`. Re-confirmed at the **v0.7.0** cut: `mov rdi,rax` →
+      `mov rax,[rbp-0x198]` → `mov [rbp-0x388],rax` → `jmp rax`. The extra
+      store is `jt`'s own stack slot — it writes the stack, never RDI.
 - `var foo[N]` sizes are in **u64 slots** — `N` × 8 bytes, not `N` bytes.
   `msg_pre[10]` = 80 bytes and the banner uses all 80. A version string
   one character longer (e.g. `0.6.9` → `0.6.10`) needs `N = 11`.
@@ -161,7 +206,27 @@ snapshot into a deliberately one-file `lib/`.
 - `tests/ovmf_smoke.sh` — runtime gate. Builds GPT-disk-with-ESP,
   copies `BOOTX64.EFI` + optionally `/boot/agnos`, boots under
   qemu-system-x86_64 + OVMF + `-cpu max`, greps ConOut serial. SKIPs
-  gracefully when tooling absent.
+  gracefully when tooling absent. `EXPECT` and `AGNOS_KERNEL` are env
+  hooks — the two v0.7.0 gates below drive it entirely through them, so
+  no disk or QEMU logic is duplicated anywhere in the test tree.
+- `tests/malformed_kernel.sh` — **v0.7.0 hardening regression gate**.
+  Mutates a real agnos ELF64 one field at a time and boots **18**
+  corrupted kernels under OVMF, asserting the specific 4-char failure
+  code for each: 6 identity rejects (`ELF`), 5 program-header-table
+  rejects (`PHN`), no-`PT_LOAD` (`PT`), and 6 segment-bounds rejects
+  (`SZ`) including the truncated-kernel case. **This gate is the reason
+  the hardening can be claimed at all** — `verify_pe.sh` and
+  `ovmf_smoke.sh` both exercise only the happy path, so without it every
+  bounds check is unexercised code, indistinguishable from an absent one.
+- `tests/multi_ptload.sh` — **M5 positive gate**. Splits the real kernel's
+  single `PT_LOAD` into two contiguous ones describing an identical memory
+  layout (program-header table appended, `e_phoff` re-pointed; no kernel
+  byte changes) and asserts baseline and split both reach
+  `Launching kybernet`. Booting the baseline too means an environmental
+  failure reports as such rather than being blamed on the split.
+- Both new gates SKIP without a real agnos ELF64 to mutate, so they are
+  local + release gates rather than per-push blockers. Wired into
+  `.github/workflows/ci.yml`.
 
 ## CI / Release
 
@@ -206,6 +271,16 @@ real choice is: declare the deps and get `cyrius test` green, or delete
   MEDIUM, 4 LOW/INFO) and **9 verified-sound** paths. Satisfies the v1.0
   *"security audit pass"* criterion; **no code changed in that pass** — it is the
   scoping document for v0.7.0.
+- **Disposition — v0.7.0 (2026-08-29) closed F1, F2, F3, F4, F6, F7, F9 and
+  the F5 comment**, and reconciled `SECURITY.md`. Remaining open: **F8**
+  (16 KB memmap buffer cannot grow — safe, brittle at >~340 descriptors;
+  deferred because the sizing `AllocatePages` must precede the final
+  `GetMemoryMap` or it invalidates the map key) and the **F5 decision**
+  (flat struct vs. a real tag stream — M4's first task). F10 was
+  informational, no action.
+- **Re-run the audit after v0.7.0** before the v1.0 cut: the criterion is
+  satisfied by having a pass, but the *sub-claims* changed materially, and
+  the ET_DYN path is still untested at runtime.
 - **Headline**: `SECURITY.md` § Threat model claims gnoboot defends against
   *"malformed kernel files … oversized program-header counts, malformed PT_LOAD
   entries. Bounds-checked at parse time"*. **None of those three clauses holds**
@@ -241,6 +316,21 @@ real choice is: declare the deps and get `cyrius test` green, or delete
 
 ## Verified
 
+- **v0.7.0 gates** (QEMU OVMF, 2026-08-29): build clean under cyrius 6.5.36
+  (pin `6.5.35`; benign drift). Structural gate PASS. OVMF runtime gate PASS
+  — `gnoboot v0.7.0: handing off to kernel`, booting the real ~1.9 MB agnos
+  ELF64 through to the **AGNOS shell**. `ud2 ud2` scan clean (0 occurrences).
+  `tests/malformed_kernel.sh` **18/18**. `tests/multi_ptload.sh` **PASS**
+  (baseline + 2-segment split both reach `Launching kybernet`). Both
+  hand-verified codegen idioms re-disassembled after the `rdrand_u64` rewrite
+  and the load-path restructure — see § Source.
+- ⚠ **v0.7.0 coverage gap — the ET_DYN / KASLR path is NOT runtime-exercised.**
+  agnos currently links ET_EXEC (single `PT_LOAD` at `0x100000`), so the PIE
+  branch — the multi-segment span allocation, the F6 retry, the F7 mask — is
+  reasoned and disassembled but never actually run. For the shipped ET_EXEC
+  kernel the new path is behaviourally identical to the old one (same span,
+  same page count, same destination, same BSS range), which is what the
+  boot-to-shell result confirms. **A PIE-kernel run is owed.**
 - **v0.6.2 gates** (QEMU OVMF, 2026-08-26): builds clean under cyrius
   6.5.35 with the re-vendored `lib/`. Structural gate PASS (subsystem
   0x000A, NX_COMPAT, no RELOCS_STRIPPED). OVMF runtime gate PASS —
@@ -265,6 +355,21 @@ real choice is: declare the deps and get `cyrius test` green, or delete
   only meaningful once the kernel reads them — see Open).
 
 ## Open
+
+- **Audit F8 — the memory map cannot grow.** `mm_buf` is a fixed 16 KB and the
+  size passed to `GetMemoryMap` matches it exactly, so it fails *closed* rather
+  than truncating (audit S2, sound). But a machine whose map exceeds ~340
+  descriptors simply will not boot, reporting only `MM`. The fix is UEFI's
+  two-call sizing pattern, with the ordering constraint that the sizing
+  `AllocatePages` must run **before** the final `GetMemoryMap` or it invalidates
+  the map key. Deferred from v0.7.0; not a correctness bug.
+- **Audit F5 decision — flat struct or real tag stream?** v0.7.0 fixed the
+  *comment* (`boot_info` is documented as flat, 120 bytes, fixed offsets, no
+  terminator — which is what it actually is). The *decision* is M4's first task:
+  declare it flat permanently and drop the tag-stream concept, or grow it to 128
+  and restore an END at `0x78`. The v1.0 criterion says "every reserved tag-type
+  slot listed", which cannot be written either way until this is settled.
+- **ET_DYN / KASLR runtime coverage.** See § Verified — needs a PIE agnos build.
 
 - **boot_info feature-fill — LANDED at v0.5.0 (gnoboot side).** gnoboot now
   fills `initramfs_phys`/`size` (0x10/0x18) from `\boot\initramfs`,

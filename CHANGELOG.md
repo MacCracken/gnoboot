@@ -19,7 +19,144 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > gnoboot picked a better mode and the firmware refused it — the elision again — and the answer moves
 > **kernel-side to a real DCN modeset**. ⛔ On that outcome, do NOT propose another SetMode variant.
 
-### Added — documentation
+## [0.7.0] — 2026-08-29
+
+**ELF-load hardening.** The kernel-load path is now bounds-checked against the file it
+is reading, every firmware `Read` is checked for a short transfer, and **all**
+`PT_LOAD` segments are loaded instead of only the first. Scoped by
+[`docs/audit/2026-08-29-audit.md`](docs/audit/2026-08-29-audit.md) (findings F1–F4, F6,
+F7, F9); merges roadmap **M5** (multi-`PT_LOAD`) and **M7** (validation hooks), which
+the audit found to be the same twenty lines of code.
+
+**Not an ABI change.** Magic `'AGNO'`, struct version `2`, `struct_size 0x78`, and
+`RDI = &boot_info` are untouched. The only handoff-visible addition is `flags` **bit 2**
+(`kaslr_no_entropy`), which is additive — a v2 reader that ignores it behaves exactly as
+before.
+
+**The realistic trigger was never an attacker.** Anyone who can write `\boot\agnos` can
+simply supply a valid kernel, which `SECURITY.md` explicitly accepts. It was a
+**truncated** kernel — an interrupted `dd`, a bad USB write, a failed ISO build. Before
+this release that loaded "successfully" and jumped into whatever `AllocatePages` returned
+(UEFI 2.x §7.2: *"undefined"*), triple-faulting with no console. It now prints a 4-char
+code before EBS, which is the entire reason the failure-code mechanism exists.
+
+The model for all of it was already in the tree: `load_esp_blob()`, the *optional*
+initramfs/cmdline loader added at v0.5.0, has done `GetInfo`-sizing and short-read
+checking from the day it landed. **The optional path was strictly safer than the
+mandatory one for two releases.**
+
+### Security
+
+- **Kernel ELF validation is now a gate, not a sanity check** (audit **F1**). The
+  pre-load check was a single byte (`0x7F`). Any file starting with `0x7F` then had its
+  `e_phoff` — an arbitrary u64 — drive `SetPosition`, and its program header drive
+  `AllocatePages` and `Read`, before the downstream 4-byte magic re-check could object.
+  That re-check is a backstop that fires *after* the allocation and the copy. Now
+  validated up front: all four magic bytes, `EI_CLASS` = ELFCLASS64, `EI_DATA` =
+  ELFDATA2LSB, `e_type` ∈ {ET_EXEC, ET_DYN}, `e_machine` = EM_X86_64, `e_phentsize` = 56.
+  `e_type` is also read as a full `load16` — the old `load8` would have accepted `0x0102`
+  as ET_EXEC.
+- **Short reads are detected** (audit **F3**). UEFI 2.10 §13.5.1 lets `Read` transfer
+  fewer bytes than asked and still return `EFI_SUCCESS`, rewriting `BufferSize` to what
+  actually arrived. The kernel segment read and both header reads never compared it back,
+  so a truncated kernel loaded short, succeeded, and left the unread tail as undefined
+  memory — the BSS zero-fill covers only `[p_filesz, p_memsz)`, not `[actual, p_filesz)`.
+- **Every segment field is bounded** (audit **F4**). `\boot\agnos` is sized via `GetInfo`
+  first, and `p_offset` / `p_filesz` / `p_memsz` / `p_paddr` are each checked against it.
+  Two distinct hazards closed: `p_filesz > p_memsz` was never rejected, so the `Read`
+  overran an allocation sized from `p_memsz`; and `p_memsz` in
+  `[0xFFFFFFFFFFFFF001, u64::MAX]` wrapped `(p_memsz + 0xFFF) / 0x1000` to **zero pages**.
+  The 256 MB cap is the kernel's own per-proc-CR3 identity ceiling, which makes the page
+  arithmetic provably wrap-free rather than merely defended.
+- **KASLR fails loudly instead of open** (audit **F6**). `rdrand_u64` never checked CF. On
+  failure `rcx` is architecturally 0, and because the 16× re-roll loop called the same
+  failing instruction every time, all 16 rolls returned the same value — the kernel loaded
+  at a fixed 32 MB and reported a `kernel_base` that is a perfectly legal slide value.
+  **The security property failed silently and indistinguishably.** Now: 10 retries per
+  Intel's DRNG guidance, and on exhaustion `boot_info` **flags bit 2 (`kaslr_no_entropy`)**
+  is set so the kernel can report *"KASLR: entropy unavailable"* rather than a base that
+  merely looks random.
+- **The KASLR slide can no longer escape its window** (audit **F7**). The normalizer was
+  `if (r < 0) { r = 0 - r; }`; negating `i64::MIN` is the identity, and cyrius `%` is
+  C-truncated, so the slide would have landed below the 32 MB floor. Both semantics were
+  **measured against the pinned toolchain**, not assumed. Now masks the sign bit.
+- **Firmware-supplied counts are bounded consistently** (audit **F9**). The ACPI
+  configuration-table walk has capped its count at 256 since v0.5.0; the GOP `QueryMode`
+  loop did not, and `load32` zero-extends (verified empirically), so a firmware reporting
+  `MaxMode = 0xFFFFFFFF` would have spun ~4×10⁹ `QueryMode` calls pre-EBS. Also now
+  guarded: a null `ConfigurationTable` with a non-zero count, and a zero `DescriptorSize`
+  dividing the memory-map size.
+- **`boot_info` flags are set with read-modify-write OR**, never a bare store. The
+  `fb_present` store would have silently cleared `kaslr_no_entropy`.
+
+### Added
+
+- **Multi-`PT_LOAD` kernel loading** (roadmap **M5**, audit **F2**). gnoboot walked
+  exactly one program header and hard-failed if it was not `PT_LOAD`. Two consequences,
+  both silent: a kernel whose first header is `PT_PHDR` or `PT_INTERP` — ordinary linker
+  output — failed at `PT` despite being valid; and a kernel with 2+ `PT_LOAD` segments
+  (any hardened RX-text / RW-data split) was **loaded partially and jumped into**. It now
+  reads the whole program-header table in one bounded pass, validates every segment before
+  allocating anything, takes one contiguous allocation spanning the image so relative
+  offsets survive a KASLR slide, then copies each segment and zeroes each BSS gap.
+  Reclassified from forward-compat feature to correctness fix.
+- **`tests/malformed_kernel.sh`** — the hardening regression gate. Mutates a real agnos
+  ELF64 one field at a time and boots **18** corrupted kernels under QEMU+OVMF, asserting
+  the specific 4-char failure code for each: 6 identity rejects (`ELF`), 5
+  program-header-table rejects (`PHN`), the no-`PT_LOAD` case (`PT`), and 6 segment-bounds
+  rejects (`SZ`) including the truncated-kernel case. Reuses `ovmf_smoke.sh` through its
+  `AGNOS_KERNEL` + `EXPECT` hooks, so no disk or QEMU logic is duplicated. **All 18 pass.**
+  Without this the new checks were unexercised code, and `verify_pe.sh` + `ovmf_smoke.sh`
+  would both stay green through a regression that deleted any of them.
+- **`tests/multi_ptload.sh`** — the M5 positive gate. Splits the real kernel's single
+  `PT_LOAD` into two contiguous ones describing an identical memory layout (fresh
+  program-header table appended, `e_phoff` re-pointed; not one byte of kernel code
+  changes), then asserts both the original and the split boot through to
+  `Launching kybernet`. Booting the baseline too means an environmental failure reports as
+  such instead of being misattributed to the split. **Both PASS.**
+- **Four new failure codes** — `GI` (GetInfo), `PHN` (program-header table), `SZ` (segment
+  bounds), `SHR` (short read). Distinct codes matter disproportionately here: iron has no
+  serial cable, so this 4-char string is the entire diagnostic channel for a kernel that
+  will not load.
+- Both new gates wired into `.github/workflows/ci.yml`. They SKIP without a real agnos
+  ELF64 to mutate, so they are local + release gates rather than per-push blockers.
+
+### Fixed
+
+- **The `boot_info` layout comment documented an END terminator that had not existed since
+  v0.6.0** (audit **F5**). The v0.6.0 `kernel_base` store at `0x70` overwrote it, so a
+  consumer walking tags would read `type = low32(kernel_base)` with `size = 0` and spin or
+  run off the end. Nothing shipped walks tags — agnos reads fixed offsets — so nothing was
+  broken, but the comment was wrong for two releases. The struct is now documented as what
+  it is: **flat, 120 bytes, fixed offsets, no tag stream**. Whether it ever grows a real
+  tag stream is M4's call, and M4 was blocked on exactly this.
+- **`SECURITY.md` § Threat model claimed defenses that were not implemented.** Its
+  *"malformed kernel files … bounds-checked at parse time"* clause was published from
+  v0.1.0 and became true only with this release. Reconciled, with the gap recorded rather
+  than quietly corrected — a threat model that overstates coverage is worse than one that
+  admits the gap, because it stops the next reader from looking. The section's other two
+  claims were audit-verified sound and are now annotated as such.
+
+### Verified
+
+- Build clean under cyrius 6.5.36 (pin `6.5.35`; benign drift). Structural gate **PASS**.
+  OVMF runtime gate **PASS** — `gnoboot v0.7.0: handing off to kernel`, booting the real
+  ~1.9 MB agnos ELF64 through to the AGNOS shell. `ud2 ud2` scan clean (0 occurrences).
+- `tests/malformed_kernel.sh` **18/18**; `tests/multi_ptload.sh` **PASS** (baseline +
+  split).
+- **Both hand-verified codegen idioms re-disassembled** after the `rdrand_u64` rewrite and
+  the load-path restructure. `rdrand_u64`: `lea rax,[rbp-0x8]` still precedes the asm
+  block, so the lea-into-rax idiom holds across the new retry loop, which emits exactly as
+  written (`mov r8,0xa` / `rdrand rcx` / `jb` / `dec r8` / `jne` / `xor rcx,rcx` /
+  `mov [rax],rcx`). Handoff tail: `mov rdi,rax` → `mov rax,[rbp-0x198]` →
+  `mov [rbp-0x388],rax` → `jmp rax` — **nothing between the two touches RDI.**
+- Binary 32,768 → **37,376 bytes** (+4,608). Build still reports `8 unreachable fns`, the
+  marker that `fncall2` remains live for the three statement-position `SetMode` calls.
+- **Not covered**: the ET_DYN / KASLR path. agnos currently links ET_EXEC, so gnoboot's
+  PIE branch — including the new multi-segment span allocation and the F6/F7 fixes — is
+  reasoned and disassembled but **not runtime-exercised**. It needs a real PIE kernel.
+
+### Audit — the scoping pass that produced this release
 
 - **`docs/audit/2026-08-29-audit.md` — gnoboot's first security / hardening audit**,
   re-derived from `src/main.cyr` at tag `0.6.2`. Satisfies the v1.0 *"security audit
@@ -70,7 +207,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pinned toolchain**, not assumed: `%` is C-truncated (negative dividend → negative
   remainder), `0 - i64::MIN` stays negative, and `load32` zero-extends.
 
-### Fixed — documentation
+### Fixed — documentation (landed with the audit pass)
 
 - **`docs/development/state.md`** — corrected two stale claims: v0.6.2 was recorded as
   *"awaiting user tag"* when it is tagged (`0.6.2` → `741e935`), and the Toolchain
