@@ -3,11 +3,53 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, the audit-scoped release: kernel-load bounds-checking against the file's actual size, short-read detection, **multi-`PT_LOAD` loading** (roadmap M5), KASLR that fails loudly instead of open, and bounded firmware counts. Closes audit findings F1–F4, F6, F7, F9; merges M5 + M7. **Not an ABI change** — only additive `flags` bit 2. Two new gates: `tests/malformed_kernel.sh` **18/18** and `tests/multi_ptload.sh` **PASS**. `SECURITY.md` reconciled. Awaiting user tag). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
+> **Last refresh**: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.7.0** — cut 2026-08-29 (awaiting user tag). **ELF-load hardening** —
+**0.7.1** — cut 2026-08-29 (awaiting user tag). Pin bump + **M4** + the bug
+M4 found.
+
+**Pin `6.5.35` → `6.5.36`, measured at zero bytes.** `lib/fnptr.cyr` is
+byte-identical between the two stdlib snapshots — including the live `fncall2`
+body the three statement-position `SetMode` calls still reach — so the re-vendor
+is provably inert, and building pre- and post-bump under the same compiler gives
+identical binaries. The version bump then contributes exactly one byte (`0x3CE2`,
+the banner's patch digit). The pin, `~/.cyrius/current`, and latest-published all
+agree again; no drift warning.
+
+**M4 shipped**: [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md)
+— the authoritative contract. Register convention and machine state at entry;
+every field with type / offset / absent-value / introducing version; the
+guarantees about the loaded kernel image; compatibility rules; required consumer
+validation; memory-lifetime ownership post-EBS; per-field consumer status against
+agnos 1.56.52; errata. **Audit F5 is settled: `boot_info` is flat and
+fixed-offset, there is no tag stream and there will not be one**, with
+append-only growth and `struct_size` as the sole authority.
+
+**⚠ The thing worth knowing about this cut: writing the spec found a field that
+had never worked.** `fb_mode_chosen` was a `u32` at `0x6C`; `fb_size` is a `u64`
+at `0x68` covering `0x68`–`0x6F`. They **overlapped**, and the `0x6C` store ran
+before the `0x68` store — so the `u64` landed last and destroyed the mode on
+every boot since v0.6.1. It read the high half of `FrameBufferSize`: `0` for any
+framebuffer under 4 GB, i.e. always.
+
+That is the field the **AMD-Zen scanout question** depends on — the whole point
+of `fb_mode_chosen` is separating *"no larger mode was offered"* from *"gnoboot
+picked one and the firmware refused"*, and it would have produced a **false
+positive on the next archaemenid burn**. Reordering was not available: putting
+`best_mode` in `fb_size`'s upper half makes agnos's `load64(bi + 0x68)` report a
+multi-gigabyte framebuffer to its WC remap. Fixed by separating them —
+`fb_mode_chosen` → `0x78`, struct 120 → **128 bytes**, `struct_size` `0x78` →
+`0x80`, `version` **unchanged at 2** because the growth is append-only. It lands
+inside agnos's existing 128-byte `boot_info_copy`, and incidentally removes the
+8-byte over-read that copy always performed.
+
+The general lesson, worth keeping: **the overlap was invisible in a comment block
+listing offsets in the order fields were added, and obvious in a table sorted by
+address.** That is what the spec bought.
+
+Prior — **0.7.0** — cut 2026-08-29 (awaiting user tag). **ELF-load hardening** —
 the release the 2026-08-29 audit scoped. Closes findings F1–F4, F6, F7, F9
 and merges roadmap **M5** (multi-`PT_LOAD`) with **M7** (validation hooks),
 which the audit found to be the same twenty lines.
@@ -97,7 +139,12 @@ change.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.5.35` (in `cyrius.cyml [package].cyrius`) — advanced
+- **Cyrius pin**: `6.5.36` (in `cyrius.cyml [package].cyrius`) — advanced from
+  `6.5.35` at the **v0.7.1** cut. **Measured inert**: `lib/fnptr.cyr` is
+  byte-identical between the 6.5.35 and 6.5.36 snapshots (`fncall2`'s live body
+  included), and pre-/post-bump binaries differ in zero bytes. Pin,
+  `~/.cyrius/current` and latest-published agree; no drift warning. History
+  below describes `6.5.35`, which was advanced
   from `6.2.44` at the v0.6.2 cut (and `6.2.24` → `6.2.44` at v0.6.0,
   which was never recorded here). `6.5.35` is the latest **released**
   cyrius (published 2026-08-22; the `install.sh` release asset resolves,
@@ -145,7 +192,9 @@ snapshot into a deliberately one-file `lib/`.
 
 ## Binary
 
-- **`build/BOOTX64.EFI`**: 37,376 bytes (PE32+ EFI Application, x86_64,
+- **`build/BOOTX64.EFI`**: 37,376 bytes at v0.7.1 — unchanged by the pin bump
+  (zero-byte delta) and by the struct growth (the extra 8 bytes are a larger
+  `var boot_info[16]` slot, not emitted instructions). PE32+ EFI Application, x86_64,
   subsystem 0x000A, `DllCharacteristics` 0x0140 = NX_COMPAT +
   DYNAMIC_BASE, `.reloc` populated).
 - Since cyrius 6.5.17 the `fncallN` call sequences are **emitted inline**
@@ -308,6 +357,24 @@ real choice is: declare the deps and get `cyrius test` green, or delete
 
 ## Consumers
 
+> Per-field consumer status lives in
+> [`docs/standards/handoff-protocol.md` § 8](../standards/handoff-protocol.md).
+> **Three cross-repo items are open against agnos**, all filed by the M4 spec
+> work and none of them gnoboot's to change:
+> 1. **Erratum E2 — `mbi.cyr` reads `struct_size` with `load64(src + 8)`**, which
+>    captures `flags` in the upper half. `ssz` is therefore always ≳2³² whenever a
+>    flag bit is set, so its `min(struct_size, 128)` clamp is **always 128** — the
+>    clamp exists precisely to stop a fixed 128-byte copy over-reading a 120-byte
+>    struct, and reading the field as a `u64` makes that fix inert. Benign today;
+>    it means agnos has no working bound from `struct_size`, which is the one
+>    mechanism the spec's forward-compat rules rely on. Fix: `load32(src + 8)`.
+> 2. **`flags` bit 2 (`kaslr_no_entropy`) has no reader.** Until it does, a KASLR
+>    report cannot tell a real slide from the deterministic fallback.
+> 3. **`fb_mode_chosen` needs a reader at `0x78`** for a burn to answer the
+>    AMD-Zen scanout question. It carried no valid value before v0.7.1, so there
+>    is nothing to migrate — only something to add.
+
+
 - **agnos kernel** (≥ 1.47.4 for the KASLR/PIE path; ≥ 1.30.0 for the
   sovereign-struct contract itself) — receives `RDI = &boot_info` via
   gnoboot's Path C handoff. agnos boot-test CI fetches gnoboot's release
@@ -316,6 +383,16 @@ real choice is: declare the deps and get `cyrius test` green, or delete
 
 ## Verified
 
+- **v0.7.1 gates** (QEMU OVMF, 2026-08-29): build clean under cyrius 6.5.36 with
+  the pin matching (no drift warning). Structural PASS. OVMF runtime PASS —
+  `gnoboot v0.7.1: handing off to kernel`, booting the real agnos ELF64.
+  `malformed_kernel.sh` **18/18**. `multi_ptload.sh` **PASS**. `ud2 ud2` clean.
+  **The 128-byte struct is consumer-compatible by demonstration, not argument**:
+  agnos 1.56.52 validates `magic`, requires `struct_size >= 0x78`, and copies
+  `min(struct_size, 128)` — the boot reaching the kernel proves the grown struct
+  passes that validator unchanged. Field disjointness re-checked arithmetically:
+  `fb_size` `0x68`–`0x6F`, `kernel_base` `0x70`–`0x77`, `fb_mode_chosen`
+  `0x78`–`0x7B`, all inside `struct_size` `0x80`; no pair overlaps.
 - **v0.7.0 gates** (QEMU OVMF, 2026-08-29): build clean under cyrius 6.5.36
   (pin `6.5.35`; benign drift). Structural gate PASS. OVMF runtime gate PASS
   — `gnoboot v0.7.0: handing off to kernel`, booting the real ~1.9 MB agnos

@@ -11,9 +11,13 @@ guarantees. Once tagged, downstream (agnos, ark, future bootable AGNOS
 spinoffs) can depend on a stable boot ABI.
 
 - [ ] **Handoff struct v1 finalized** — `agnos_boot_info` layout
-      stable, no field renames, magic `0x41474E4F` locked. Spec
-      lives in `docs/standards/handoff-protocol.md` (earned at v0.5
-      or so when more fields are populated).
+      stable, no field renames, magic `0x41474E4F` locked. **Spec
+      SHIPPED at v0.7.1** —
+      [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md)
+      (roadmap M4). **Not yet frozen**: freezing requires § Errata empty or
+      consciously accepted. E1 fixed at v0.7.1; **E2 (agnos reads
+      `struct_size` as a u64, so its bound is inert) and E3 (`flags` bit 0
+      `serial` specified but never set) remain**.
 - [ ] **All inlined fields populated** — initramfs, cmdline,
       memmap, ACPI RSDP, EFI SystemTable. v0.1.0 only fills
       memmap + efi_st_phys.
@@ -136,7 +140,7 @@ next agnos burn.
 
 > Historical M-number. Now v0.5.0 item 3. Kept for continuity.
 
-### M4 — handoff-protocol v1 spec doc
+### M4 — handoff-protocol v1 spec doc — ✅ SHIPPED at v0.7.1
 
 `docs/standards/handoff-protocol.md` written as the authoritative
 spec. Every field documented; every reserved tag-type slot listed;
@@ -144,6 +148,30 @@ versioning rules + forward-compat rules pinned. **Hardens the contract
 for v1.0.** Re-slots to **~v0.6.0** now that v0.5.0 is the boot_info
 feature-fill; should be drafted once the v0.5.0 fills settle the field
 layout (so the spec documents the as-shipped struct, not a moving target).
+
+> ✅ **Shipped 2026-08-29 at v0.7.1**:
+> [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md).
+> **F5 is settled — `boot_info` is flat and fixed-offset; there is no tag stream
+> and there will not be one**, with append-only growth and `struct_size` as the
+> sole authority. Not a ratification of the accident: the inlined layout exists
+> because the kernel canary reads `fb_phys` from raw asm at entry instruction
+> one; a tag walker over firmware-influenced data is an unbounded loop of exactly
+> the class the audit was written to remove; and fixed offsets are checkable by
+> inspection where a tag stream is not.
+>
+> **Writing it found a live bug** (spec erratum **E1**): `fb_mode_chosen` at
+> `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot
+> since v0.6.1 — the AMD-Zen scanout diagnostic had never once reached the
+> kernel. Fixed in the same cut by relocating it to `0x78` and growing the struct
+> to 128 bytes. **The overlap was invisible in a comment block ordered by when
+> fields were added, and obvious in a table ordered by address.**
+>
+> **Still open before the v1.0 freeze**: erratum **E2** (agnos reads
+> `struct_size` as a `u64`, so its bound is inert — agnos-side) and **E3**
+> (`flags` bit 0 `serial` is specified but no producer sets it — give it a
+> meaning or retire it).
+
+<details><summary>Original M4 note (superseded)</summary>
 
 > **The 2026-08-29 audit found the blocker (F5).** The spec cannot be written
 > until one decision is made: **is `boot_info` a flat 120-byte struct, or a
@@ -155,6 +183,8 @@ layout (so the spec documents the as-shipped struct, not a moving target).
 > struct currently contradicts its own documentation. Either declare it flat and
 > drop the tag-stream concept, or grow it to 128 bytes and restore an END at
 > `0x78`. **That call is M4's first task, not its last.**
+
+</details>
 
 ### M5 — multi-PT_LOAD support — ✅ SHIPPED at v0.7.0 (merged with M7)
 

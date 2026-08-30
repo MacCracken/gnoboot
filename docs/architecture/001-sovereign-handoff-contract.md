@@ -1,6 +1,6 @@
 # 001 — Sovereign handoff contract
 
-> **Discovered**: 2026-05-13 (v0.1.0 Step 7) | **Subject**: AGNOS kernel entry register state, struct layout, and the irrevocability of `ExitBootServices`
+> **Discovered**: 2026-05-13 (v0.1.0 Step 7) | **Layout section superseded**: 2026-08-29 (v0.7.1 — see below) | **Subject**: AGNOS kernel entry register state, struct layout, and the irrevocability of `ExitBootServices`
 
 ## What's true about the code
 
@@ -9,9 +9,9 @@ kernel entry point, the CPU state matches **exactly** this contract.
 Deviation breaks the kernel-side `boot_info_capture_rdi` and any
 downstream code that reads `boot_info_ptr`.
 
-| Register | Value at kernel entry (`0x1000A8`) |
+| Register | Value at kernel entry |
 |---|---|
-| RIP | Kernel's ELF e_entry (`0x1000A8` for agnos 1.30.x) |
+| RIP | Kernel's ELF `e_entry` for `ET_EXEC`; `load_base + (e_entry - min_paddr)` for an `ET_DYN` PIE kernel (v0.6.0 KASLR). The hardcoded `0x1000A8` in this table's heading is the agnos 1.30.x value and is no longer assumed by gnoboot. |
 | RDI | Physical address of `agnos_boot_info` struct (the **sovereign-struct pointer**) |
 | RAX | Undefined |
 | RCX, RDX, RSI, R8-R11 | Undefined (caller-saved in both ABIs, may hold cyrius/firmware leftovers) |
@@ -23,59 +23,47 @@ downstream code that reads `boot_info_ptr`.
 | EFER | UEFI's value: LME + NXE set |
 | CS | UEFI's 64-bit code segment selector (typically `0x38` on QEMU OVMF) |
 | DS/ES/SS | UEFI's data segment selectors |
-| Interrupts | Disabled (UEFI sets `cli` before EBS handoff per spec) |
+| Interrupts | Whatever UEFI left. **gnoboot executes no `cli`/`sti` and asserts nothing here** — this row records firmware behaviour inherited from the UEFI spec, not a gnoboot guarantee. A kernel should establish its own interrupt state rather than rely on it. |
 | UEFI Boot Services | **Terminated** — gnoboot called ExitBootServices. No more ConOut, AllocatePages, file I/O. |
 | UEFI Runtime Services | Available via `boot_info->efi_st_phys->RuntimeServices`. Firmware-dependent reliability. |
 
-## Sovereign boot-info struct (112 bytes — v2 wire)
+## Sovereign boot-info struct
 
-Magic `0x41474E4F = 'AGNO'` little-endian at offset 0. Kernel asserts
-this byte sequence to refuse foreign bootloaders.
+> ⛔ **The layout is no longer duplicated here.** The authoritative field-by-field
+> contract is
+> [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md)
+> (roadmap M4, shipped v0.7.1) — every field with its type, offset, absent-value
+> and introducing version, plus the compatibility rules and the validation a
+> consumer must perform.
+>
+> **This section used to carry its own copy of the table, and it went stale**:
+> it still said `struct_size = 112 (0x70)` with an END tag at `0x68`, three
+> generations behind the code (the v0.4.x `fb_size`, the v0.5.0 initramfs /
+> cmdline / RSDP fills, the v0.6.0 `kernel_base`, and the v0.7.1 growth to 128
+> bytes all landed after it was written). A struct described in three places is
+> a struct described wrong in at least one of them; the spec is now the single
+> source and this document points at it.
 
-**Version 2** is the current wire (bumped from v1 in v0.1.0 canary
-build to inline the framebuffer fields at 0x48-0x60 so the agnos
-boot-shim canary can read `fb_phys` from raw asm at entry instruction
-#1 without walking a tag stream; see iron-nuc-zen-log § Attempt 6 +
-gnoboot/src/main.cyr inline layout comment).
+What remains true and specific to *this* document — the things a reader needs
+about the code rather than the wire:
 
-```
-0x00  u32   magic            = 0x41474E4F ('AGNO')
-0x04  u32   version          = 2
-0x08  u32   struct_size      = 112 (0x70)
-0x0C  u32   flags            (bit 0=serial, bit 1=fb_present)
-0x10  u64   initramfs_phys   (0 in v0.1.0)
-0x18  u64   initramfs_size   (0 in v0.1.0)
-0x20  u64   cmdline_phys     (0 in v0.1.0)
-0x28  u64   memmap_phys      → first byte of EFI_MEMORY_DESCRIPTOR[] array
-0x30  u32   memmap_count     count of entries
-0x34  u32   memmap_entsize   firmware-reported descriptor size (0x30 / 0x38)
-0x38  u64   acpi_rsdp_phys   (0 in v0.1.0)
-0x40  u64   efi_st_phys      EFI SystemTable* (for RuntimeServices post-EBS)
-0x48  u64   fb_phys          GOP Mode->FrameBufferBase (0 = no fb)
-0x50  u32   fb_pitch         bytes per scanline (ppl * 4, 32-bpp assumed)
-0x54  u32   fb_width         GOP Info->HorizontalResolution
-0x58  u32   fb_height        GOP Info->VerticalResolution
-0x5C  u32   fb_pixel_format  0=RGB 1=BGR 2=Bitmask 3=BltOnly
-0x60  u32   fb_mode_current  GOP Mode->Mode    (which mode firmware booted)
-0x64  u32   fb_mode_max      GOP Mode->MaxMode (how many modes available)
-0x68  tag[] type=0 END
-```
-
-**0x60 / 0x64 overlay**: `fb_mode_current` and `fb_mode_max` overlay
-the previously-reserved u64 at 0x60. **No version bump** because v2
-readers ignored those 8 bytes — readers that don't know about the
-overlay still work, readers that do know it use the values. Added in
-agnos 1.30.12 / gnoboot 0.2.x to surface GOP mode # for quiet-boot vs
-VGA-spec divergence diagnosis (see agnosticos `iron-nuc-zen-log.md`
-1.30.12 entry).
-
-The struct lives in the gnoboot binary's `.bss` (cyrius global,
-populated at runtime). After `ExitBootServices`, this memory is
-classified as `EfiLoaderData` in the memmap — kernel may reclaim
-once it's done reading. gnoboot does not deliberately allocate the
-struct in fresh AllocatePages memory because (a) it's small (112 B)
-and (b) the kernel will recover all `EfiLoaderData` regions as
-free RAM after it parses the memmap.
+- **Magic `0x41474E4F` = `'AGNO'`** little-endian at offset 0, and the kernel
+  really does assert it. That was aspirational when this document was written in
+  2026-05; it became true at **agnos 1.56.51**, which validates magic and
+  `struct_size` before trusting the pointer and leaves `boot_info_ptr` zero on
+  failure so every downstream guard engages.
+- **Wire version 2**, unchanged since the v0.1.0 canary build. The framebuffer
+  fields are *inlined at fixed offsets* rather than delivered as tags precisely
+  so the agnos boot-shim canary can read `fb_phys` from raw assembly at entry
+  instruction #1, before a stack exists — walking a tag stream there is brutal.
+  See iron-nuc-zen-log § Attempt 6. That single constraint is why the struct is
+  flat, and the spec's § 6 now makes "flat, forever" an explicit rule.
+- **The struct lives in the gnoboot binary's globals**, populated at runtime —
+  not in fresh `AllocatePages` memory. It is small, and post-EBS it is
+  conventional RAM classified `EfiLoaderCode`/`EfiLoaderData` in the memmap. The
+  same is true of the memory map buffer that `memmap_phys` points at. **The
+  kernel must copy both before reclaiming loader memory** — see the spec's § 7
+  for the full ownership table.
 
 ## Constraints implied
 

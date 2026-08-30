@@ -116,6 +116,8 @@ At every major version bump (v1.0.0, v2.0.0, …) write a retrospective in `docs
 
 ## Docs
 
+- [`docs/standards/handoff-protocol.md`](docs/standards/handoff-protocol.md) — **the handoff contract** (authoritative; the struct layout lives here and nowhere else)
+- [`docs/audit/`](docs/audit/) — security / hardening audit passes
 - [`docs/adr/`](docs/adr/) — architecture decision records (*why X over Y?*)
 - [`docs/architecture/`](docs/architecture/) — non-obvious constraints (*what's true about the code?*)
 - [`docs/guides/`](docs/guides/) — task-oriented how-tos

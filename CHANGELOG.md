@@ -19,6 +19,115 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > gnoboot picked a better mode and the firmware refused it — the elision again — and the answer moves
 > **kernel-side to a real DCN modeset**. ⛔ On that outcome, do NOT propose another SetMode variant.
 
+## [0.7.1] — 2026-08-29
+
+Toolchain pin-bump patch release that grew a spec and a struct on the way. Three things
+landed: the `cyrius.cyml` pin `6.5.35` → `6.5.36`, roadmap **M4** —
+[`docs/standards/handoff-protocol.md`](docs/standards/handoff-protocol.md), the
+authoritative handoff contract — and the **one live bug that writing the spec exposed**.
+
+**Measured, not assumed** (the v0.6.2 discipline). Building the pre-bump and post-bump
+trees under the same compiler produces binaries differing in **zero bytes**: `lib/fnptr.cyr`
+is byte-identical between the 6.5.35 and 6.5.36 stdlib snapshots — including the live
+`fncall2` body that three statement-position `SetMode` calls still reach — so the
+re-vendor is provably inert, and nothing in 6.5.36 changes gnoboot's emit. The version
+bump then contributes **exactly one byte**: file offset `0x3CE2`, the banner's patch digit
+`'0'` → `'1'`. The pin-drift warning that rode every build since the v0.7.0 cut is gone.
+
+### Fixed
+
+- **`fb_mode_chosen` had never once reached the kernel** — handoff-protocol erratum **E1**.
+  It was declared as a `u32` at `0x6C`; `fb_size` is a `u64` at `0x68` occupying
+  `0x68`–`0x6F`. **They overlapped**, and `src/main.cyr` wrote `0x6C` first (the
+  mode-selection block) and `0x68` second (the post-`SetMode` geometry re-read) — so the
+  `u64` store landed last and destroyed the mode on every boot since v0.6.1. A consumer
+  reading `0x6C` got the **high 32 bits of `FrameBufferSize`**, which is `0` for any
+  framebuffer under 4 GB. Always `0`. Every release since v0.6.1.
+
+  **This is the field the AMD-Zen scanout question depends on.** Its only purpose is
+  letting an iron burn distinguish *"no larger mode was offered"* from *"gnoboot selected
+  a larger mode and the firmware refused it"*. Because it always read `0`, on any machine
+  whose `fb_mode_current` is non-zero the diagnostic reported a **false positive** pointing
+  at the wrong conclusion — and it would have done so on the next archaemenid burn.
+
+  **Reordering the two stores was not an available fix.** Writing `0x6C` last puts
+  `best_mode` into the upper half of `fb_size`, and agnos reads that field with a full
+  `load64(bi + 0x68)` — it would have seen a multi-gigabyte framebuffer and handed that
+  extent to its write-combining remap. The fields had to be **separated**.
+
+  Fixed by relocating `fb_mode_chosen` to **`0x78`** and growing the struct **120 → 128
+  bytes** (`struct_size` `0x78` → `0x80`). `0x6C` is no longer a field and must not be
+  read; `0x7C`–`0x7F` is reserved padding and the next append site.
+
+### Changed
+
+- **`cyrius.cyml` toolchain pin `6.5.35` → `6.5.36`**, with `lib/fnptr.cyr` re-vendored
+  from the matching snapshot (`cyrius lib sync` after the pin bump, never before, and
+  never `--full`). Verified byte-identical against both the 6.5.35 and 6.5.36 snapshots.
+- **`boot_info` is 128 bytes**, `struct_size` = `0x80`. **`version` stays `2`, and this is
+  not an ABI break**: the growth is append-only under the new spec's § 6 — every
+  pre-existing field keeps its offset and type, so a v2 fixed-offset reader is unaffected.
+  It also lands inside agnos's existing 128-byte `boot_info_copy`, which takes
+  `min(struct_size, 128)` — so the shipped kernel accommodates it exactly, and as a side
+  effect the 8-byte over-read that copy has always performed against a 120-byte struct
+  goes away.
+
+### Added
+
+- **[`docs/standards/handoff-protocol.md`](docs/standards/handoff-protocol.md) — roadmap
+  M4, the authoritative handoff contract.** Register convention and machine state at
+  entry; every field with its type, offset, absent-value and introducing version; what
+  gnoboot guarantees about the loaded kernel image; the compatibility rules; the
+  validation a consumer *must* perform; memory-lifetime ownership after
+  `ExitBootServices`; per-field consumer status against agnos 1.56.52; and an errata
+  section.
+
+  **Audit finding F5 is settled: `boot_info` is a flat, fixed-offset struct. There is no
+  tag stream and there will not be one.** Not a ratification of the accident that
+  destroyed the old END terminator — a decision: the inlined-field layout exists precisely
+  because the kernel's boot canary reads `fb_phys` from raw assembly at entry instruction
+  one, a tag walker over firmware-influenced data is an unbounded loop of exactly the
+  class the 2026-08-29 audit was written to remove, and fixed offsets are checkable by
+  inspection where a tag stream is not. Evolution is **append-only**, with `struct_size`
+  as the sole authority and `0` always meaning absent.
+
+  Documenting the layout field-by-field is what surfaced E1 — the overlap is invisible in
+  a comment block listing offsets in the order they were added, and obvious in a table
+  sorted by address.
+
+### Cross-repo — filed, not changed
+
+- **agnos reads `struct_size` as a `u64`** — erratum **E2**. `kernel/arch/x86_64/mbi.cyr`
+  does `load64(src + 8)`, which captures `flags` in the upper half, so `ssz` is always
+  ≳2³² whenever any flag bit is set. Its `min(struct_size, 128)` clamp is therefore
+  **always 128** — the clamp was added specifically to stop a fixed 128-byte copy from
+  over-reading gnoboot's 120-byte struct, and reading the field as a `u64` makes that fix
+  inert. Benign today (the over-read stays inside gnoboot's `.data`), but it means agnos
+  has no working bound from `struct_size`, which is the one mechanism the spec's
+  forward-compatibility rules rely on. Fix is `load32(src + 8)`. gnoboot does not modify
+  agnos.
+- **`flags` bit 2 (`kaslr_no_entropy`) has no kernel-side reader yet.** Until it does, a
+  KASLR report cannot distinguish a real slide from the deterministic fallback.
+- **`fb_mode_chosen` needs a kernel-side reader at `0x78`** for the scanout question to be
+  answerable from a burn. It carried no valid value before this release, so there is
+  nothing to migrate — only something to add.
+
+### Verified
+
+- Build clean under cyrius 6.5.36 with the pin matching; no drift warning. Structural gate
+  **PASS**. OVMF runtime gate **PASS** — `gnoboot v0.7.1: handing off to kernel`, booting
+  the real agnos ELF64. `tests/malformed_kernel.sh` **18/18**. `tests/multi_ptload.sh`
+  **PASS**. `ud2 ud2` scan clean.
+- **The struct growth is consumer-compatible, demonstrated rather than argued**: agnos
+  1.56.52 validates `magic`, requires `struct_size >= 0x78`, and copies
+  `min(struct_size, 128)` — the OVMF boot reaching the kernel proves the 128-byte struct
+  passes that validator unchanged.
+- Field disjointness re-checked arithmetically after the move: `fb_size` `0x68`–`0x6F`,
+  `kernel_base` `0x70`–`0x77`, `fb_mode_chosen` `0x78`–`0x7B`, all within `struct_size`
+  `0x80`. No pair overlaps.
+- **Still not covered**: the ET_DYN / KASLR path (agnos links ET_EXEC), unchanged from
+  v0.7.0.
+
 ## [0.7.0] — 2026-08-29
 
 **ELF-load hardening.** The kernel-load path is now bounds-checked against the file it
