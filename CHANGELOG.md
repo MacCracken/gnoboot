@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-11
+
+### Changed
+
+- **Toolchain `6.5.36` → `6.6.2`.** Migrated to the `Result` value form:
+  3 first-party file(s) changed. Every surface re-verified — build, tests, and any
+  bench/fuzz/distlib target the repo ships.
+
+
 > **Next-cycle signpost for the AMD-Zen Quiet-Boot scanout residue** (closed out at 0.4.2): the gnoboot-side GOP `SetMode` lever is exhausted on archaemenid. **Do NOT propose another SetMode variant** — both same-mode (0.4.1, Attempt 74) and different-mode bounce (0.4.2, Attempt 78) are firmware-elided on AMD Zen UEFI. Next channel for the bug is **kernel-side**, not gnoboot-side: either a minimal-redesign port of Linux's HUBP `clear_tiling` sequence (per amd-gfx ML; 3-6 MMIO writes per HUBP; DCN1→DCN3 register offsets inherited; Cezanne PCI BAR0 of `1002:1638`), OR an architectural decision about adopting shadow-buffer semantics for the AGNOS FB-console layer (simpledrm-style, per `archintel` Attempt 79 cross-check finding). Intel cross-check on archintel was structurally inconclusive (no BGRT table, hybrid Intel+NVIDIA GPU, Linux uses simpledrm). Older single-iGPU Intel box with BGRT-publishing firmware is the parked future discriminator. Full closeout record in `agnosticos/docs/development/iron-nuc-zen-log.md` § Attempt 79; memory pin: `project_amd_zen_scanout_residue`.
 
 > ⚠⚠ **THE SIGNPOST ABOVE IS A DIRECT RISK TO THE MODE SELECTION BELOW — and a QEMU pass does not

@@ -1,4 +1,14 @@
 # gnoboot fuzz harness
+#
+# gnoboot declares only `fnptr` in [deps].stdlib so the freestanding UEFI
+# build (src/main.cyr -> BOOTX64.EFI) stays free of Linux-syscall stdlib.
+# This harness therefore includes what IT needs explicitly (println/strlen
+# live in string.cyr, not io.cyr); vec.cyr is fmt.cyr's unstated peer.
+include "lib/syscalls.cyr"
+include "lib/string.cyr"
+include "lib/vec.cyr"
+include "lib/fmt.cyr"
+include "lib/alloc.cyr"
 
 fn fuzz_main(data, len) {
     if (len == 0) { return 0; }
@@ -13,4 +23,4 @@ fn main() {
 }
 
 var r = main();
-syscall(60, r);
+sys_exit_group(r);

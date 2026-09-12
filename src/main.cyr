@@ -939,7 +939,7 @@ fn efi_main(handle, st): i64 {
     if (nents > 256) { nents = 256; }                # bound a malformed count
     if (nents < 0)   { nents = 0; }                  # u64 > i64 max — treat as absent
     if (ctab == 0)   { nents = 0; }                  # v0.7.0 (audit F9): null table with a
-                                                     # non-zero count would walk from address 0
+    # non-zero count would walk from address 0
     var rsdp   = 0;
     var rsdp10 = 0;
     var ti = 0;
