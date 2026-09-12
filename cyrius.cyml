@@ -1,6 +1,6 @@
 [package]
 name = "gnoboot"
-version = "0.7.1"
+version = "${file:VERSION}"
 description = "gnoboot — AGNOS sovereign UEFI bootloader"
 license = "GPL-3.0-only"
 language = "cyrius"
