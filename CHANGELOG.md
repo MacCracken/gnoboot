@@ -6,6 +6,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-01
+
+Toolchain pin bump, `6.6.20` → `6.7.9`. No ABI change: magic `'AGNO'`, struct version `2`,
+`struct_size 0x80` and `RDI = &boot_info` are untouched.
+
+**Measured inert.** The unchanged source under 6.7.9, with `lib/fnptr.cyr` re-vendored, builds
+the 0.7.3 image byte for byte (35,328 bytes, `ec7393fc…`). The version bump then moves exactly
+**two bytes**: file offsets `0x4016` and `0x401A`, the banner's minor and patch digits.
+
+### Changed
+
+- **Toolchain `6.6.20` → `6.7.9`.** The cyrius CHANGELOG has no UEFI entry in this range.
+- **`lib/fnptr.cyr` re-vendored from the 6.7.9 snapshot.** A real code delta this time: `cx` arms
+  for every `fncallN`, and `fncall8`'s argument order on Linux, macOS and agnos. None of it
+  reaches an EFI image, and all nine bodies stay unreachable.
+- **Re-vendoring now uses `cyrius lib sync --no-lock`**, recorded in `cyrius.cyml`.
+
+### Known issues
+
+- **`stdlib = ["fnptr"]` stays commented out.** The declared form still fails at 6.7.9 with
+  `reserved intrinsic name 'fncall0'`.
+- **CI's three boot gates still SKIP and report success.** Everything below was run locally.
+
+### Verified
+
+Structural PASS. OVMF runtime PASS booting real agnos 1.57.14. `malformed_kernel.sh` **18/18**.
+`multi_ptload.sh` PASS. `cyrius test`, `bench` and `fuzz` green. `ud2 ud2` clean. The disassembly
+results from 0.7.3 carry over because the code is byte-identical. **Not run on iron.**
+
 ## [0.7.3] — 2026-11-01
 
 Toolchain pin-bump patch release, `6.6.2` → `6.6.20`. No ABI change: magic `'AGNO'`,

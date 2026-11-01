@@ -3,11 +3,19 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-11-01 (**v0.7.3 cut** — pin `6.6.2` → `6.6.20`, **not inert**: image 37,376 → 35,328 bytes; version bump itself one byte at `0x401A`. Fixed the banner 0.7.2 left at `v0.7.1`. `stdlib = ["fnptr"]` commented out to work around a cyrius bug. All local gates green; awaiting user tag, not iron-tested. Found CI's boot gates SKIP). Prior: 2026-09-11 (**v0.7.2 cut** — pin `6.5.36` → `6.6.2`; this file was not refreshed at that cut, the entry below was backfilled at v0.7.3). Prior: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
+> **Last refresh**: 2026-11-01 (**v0.8.0 cut** — pin `6.6.20` → `6.7.9`, **measured inert**: the compiler-only build is byte-identical to 0.7.3; the version bump is two bytes. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.7.3 cut** — pin `6.6.2` → `6.6.20`, **not inert**: image 37,376 → 35,328 bytes; version bump itself one byte at `0x401A`. Fixed the banner 0.7.2 left at `v0.7.1`. `stdlib = ["fnptr"]` commented out to work around a cyrius bug. All local gates green; awaiting user tag, not iron-tested. Found CI's boot gates SKIP). Prior: 2026-09-11 (**v0.7.2 cut** — pin `6.5.36` → `6.6.2`; this file was not refreshed at that cut, the entry below was backfilled at v0.7.3). Prior: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.7.3** — cut 2026-11-01 (awaiting user tag). Toolchain pin bump plus the
+**0.8.0** — cut 2026-11-01 (awaiting user tag). Toolchain pin bump, `6.6.20` →
+`6.7.9`. No ABI change.
+
+**Measured inert.** The unchanged source under 6.7.9 with the re-vendored
+`lib/fnptr.cyr` builds the 0.7.3 image byte for byte. The version bump then moves
+two bytes, `0x4016` and `0x401A`. The `stdlib = ["fnptr"]` workaround and the CI
+gap from 0.7.3 both still stand.
+
+Prior — **0.7.3** — cut 2026-11-01, tagged `0.7.3`. Toolchain pin bump plus the
 banner fix 0.7.2 missed. No ABI change.
 
 **Pin `6.6.2` → `6.6.20`, and this one is not inert.** The image drops
@@ -158,11 +166,13 @@ change.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.6.20` (in `cyrius.cyml [package].cyrius`) — advanced from
-  `6.6.2` at the **v0.7.3** cut. Deliberately not latest: `~/.cyrius/current`
+- **Cyrius pin**: `6.7.9` (in `cyrius.cyml [package].cyrius`) — advanced from
+  `6.6.20` at the **v0.8.0** cut. Deliberately not latest: `~/.cyrius/current`
   is `6.7.18`, and the `cyrius` wrapper dispatches on the pin, so `cyrius
-  --version` here reports `6.6.20`. **Not measured inert**, unlike the two bumps
-  below: 6.6.5 and 6.6.16 both change the emitted image (see § Binary).
+  --version` here reports `6.7.9`. **Measured inert**: zero bytes differ from
+  the 0.7.3 image before the version bump.
+- **Prior pin** `6.6.20` — advanced from `6.6.2` at the **v0.7.3** cut. **Not
+  measured inert**: 6.6.5 and 6.6.16 both change the emitted image (see § Binary).
 - **Prior pin** `6.5.36` — advanced from
   `6.5.35` at the **v0.7.1** cut. **Measured inert**: `lib/fnptr.cyr` is
   byte-identical between the 6.5.35 and 6.5.36 snapshots (`fncall2`'s live body
@@ -228,16 +238,18 @@ are destructive:
   Never run it here.
 
 To re-vendor: bump `[package].cyrius` first, uncomment `stdlib = ["fnptr"]`, run
-`cyrius lib sync`, then re-comment the line. The pin must move first, because sync
-vendors from the **manifest pin** and otherwise silently re-vendors the old
-snapshot. Do not pass `--full`.
+`cyrius lib sync --no-lock`, then re-comment the line. The pin must move first,
+because sync vendors from the **manifest pin** and otherwise silently re-vendors
+the old snapshot. Do not pass `--full`. A build run while the line is uncommented
+writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
 
 ## Binary
 
-- **`build/BOOTX64.EFI`**: 35,328 bytes at v0.7.3 (was 37,376). The 2 KB drop is
-  cyrius 6.6.16 baking byte lists into the image. The version bump itself is
-  **exactly one byte** against the same-compiler build: file offset `0x401A`, the
-  banner's patch digit. PE32+ EFI Application, x86_64, subsystem 0x000A,
+- **`build/BOOTX64.EFI`**: 35,328 bytes at v0.8.0, unchanged since v0.7.3 (37,376
+  before that). The 2 KB drop was cyrius 6.6.16 baking byte lists into the image.
+  The v0.8.0 version bump is **exactly two bytes** against the same-compiler build:
+  file offsets `0x4016` and `0x401A`, the banner's minor and patch digits. PE32+
+  EFI Application, x86_64, subsystem 0x000A,
   `DllCharacteristics` 0x0140 = NX_COMPAT + DYNAMIC_BASE, `.reloc` populated.
 - **`.rdata` is writable** (`0xC0000040`, R+W, no X) and holds gnoboot's globals
   despite the name, so `efi_fail`'s in-place patch of `msg_fail` still works
@@ -341,10 +353,11 @@ Direct (declared in `cyrius.cyml`):
 None declared since v0.7.3. `src/main.cyr` includes one stdlib module directly:
 
 - stdlib — `lib/fnptr.cyr` (`fncall0`–`fncall8`, the definitions that enable the
-  compiler's inline MS x64 firmware-call lowering). Vendored from the `6.6.20`
+  compiler's inline MS x64 firmware-call lowering). Vendored from the `6.7.9`
   snapshot and tracked in git; never hand-edited. Since 6.6.5 no call site
   reaches its bodies (see § Binary), so a change there is no longer a boot-path
-  change. The `6.6.2` → `6.6.20` delta was comment-only anyway. No other stdlib
+  change. The `6.6.20` → `6.7.9` delta is real code (`cx` arms, and `fncall8`'s
+  argument order on other targets) and emits zero bytes here. No other stdlib
   deps; a UEFI Application is freestanding.
 
 **⛔ `stdlib = ["fnptr"]` is commented out in `cyrius.cyml` — a workaround for a
@@ -363,7 +376,7 @@ produce the same image. What it costs is the automatic re-vendor, so see
 § Toolchain before touching `lib/`. Tracked in the roadmap.
 
 **The test target builds again** (it did not through v0.7.1). `cyrius test`,
-`bench` and `fuzz` all pass at 6.6.20, on smoke-level cases only. They and
+`bench` and `fuzz` all pass at 6.7.9, on smoke-level cases only. They and
 `src/test.cyr` reach stdlib modules that are not vendored, through the
 compiler-side fallback to the pinned snapshot; that is deliberate, because
 vendoring them would grow the one-file `lib/`. Neither release gate touches
@@ -441,6 +454,13 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
 
 ## Verified
 
+- **v0.8.0 gates** (QEMU OVMF, 2026-11-01, **local only** — see § Open): build clean
+  under cyrius 6.7.9 with the pin matching; two builds reproduce
+  `bf2ac65fa7ce51ed…`. Structural PASS. OVMF runtime PASS —
+  `gnoboot v0.8.0: handing off to kernel`, booting real agnos 1.57.14.
+  `malformed_kernel.sh` **18/18**. `multi_ptload.sh` **PASS**. `cyrius test`, `bench`,
+  `fuzz` green. `ud2 ud2` clean. Not re-disassembled, because the code is
+  byte-identical to the v0.7.3 image below.
 - **v0.7.3 gates** (QEMU OVMF, 2026-11-01, **local only** — see § Open): build clean
   under cyrius 6.6.20 with the pin matching; two builds reproduce
   `ec7393fc9ca1b02b…`. Structural PASS. OVMF runtime PASS —
@@ -450,9 +470,10 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
   green. `ud2 ud2` clean. Disassembled: the landing (§ Binary), `rdrand_u64`, and
   the handoff tail; nothing between `mov rdi,rax` and `jmp rax` writes RDI. `boot_info`
   header read from the image: `0x41474E4F`, version 2, `struct_size` `0x80`.
-- ⚠ **v0.7.3 is not iron-validated**, and that matters more than usual: 6.6.5
-  changed the entry sequence every firmware call runs under, and cyrius's own
-  notes say OVMF tolerates a misaligned CALL. **Run it on the next agnos burn.**
+- ⚠ **Neither v0.7.3 nor v0.8.0 is iron-validated**, and that matters more than
+  usual: 6.6.5 changed the entry sequence every firmware call runs under, and
+  cyrius's own notes say OVMF tolerates a misaligned CALL. **Run it on the next
+  agnos burn.**
 - **v0.7.1 gates** (QEMU OVMF, 2026-08-29): build clean under cyrius 6.5.36 with
   the pin matching (no drift warning). Structural PASS. OVMF runtime PASS —
   `gnoboot v0.7.1: handing off to kernel`, booting the real agnos ELF64.

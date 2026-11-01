@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "gnoboot — AGNOS sovereign UEFI bootloader"
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.6.20"
+cyrius = "6.7.9"
 
 [build]
 entry = "src/main.cyr"
@@ -30,5 +30,5 @@ output = "BOOTX64.EFI"
 # lib/fnptr.cyr stays vendored and tracked.
 # Do NOT run a bare `cyrius lib sync` or `cyrius update` here: with nothing
 # declared, sync dumps the full 113-file snapshot, and update ignores the pin.
-# To re-vendor: uncomment, `cyrius lib sync`, re-comment.
+# To re-vendor: uncomment, `cyrius lib sync --no-lock`, re-comment.
 # stdlib = ["fnptr"]
