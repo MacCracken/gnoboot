@@ -4,13 +4,25 @@
 > lives in [`state.md`](state.md); this file is the sequencing — what
 > ships, in what order, against what dependency gates.
 
+## Restoring `stdlib = ["fnptr"]`
+
+Commented out in `cyrius.cyml` at v0.7.3 because of a cyrius bug, present at
+6.6.20 and still at 6.7.18. `PP_EMIT_PKGVER` emits its declaration with no
+trailing newline, so an `include` on the first prelude line gets its `#@file`
+marker mid-line, `FM_BUILD` skips it (`FM_ATBOL`), and that file reads as
+`<source>`. Since `fnptr` is gnoboot's only dep it sits there, and 6.6.20's
+exemption for files named `fnptr.cyr` stops applying. Details in `state.md`
+§ Dependencies.
+
+- [ ] Pin a cyrius with the fix, uncomment the line, run `cyrius lib sync`, and
+      confirm `lib/` stays one file and the image hash does not move.
+
 ## Moving the cyrius pin to 6.6.5
 
-Nothing breaks at this bump. cyrius 6.6.5 is not tagged yet, and
-nothing below can land against the pin until it is. The pin is 6.6.2
-today, and this section lists only what 6.6.5 itself changes.
+Shipped at v0.7.3, which took the pin from 6.6.2 to 6.6.20. This section
+lists only what 6.6.5 itself changed.
 
-- [ ] The UEFI firmware calls through `fncallN` (`src/main.cyr`, e.g.
+- [x] The UEFI firmware calls through `fncallN` (`src/main.cyr`, e.g.
       `efi_print` at `:347`) ran with rsp 8 bytes off 16-byte alignment
       on ≤ 6.6.4. 6.6.5 seeds the UEFI entry's alignment (efi_main
       trampoline frame `0x20`, was `0x28`), parks the entry rsp in `r13`
@@ -20,10 +32,12 @@ today, and this section lists only what 6.6.5 itself changes.
       note in `state.md` (`:230-233`) already requires. See the cyrius
       CHANGELOG [6.6.5] entry
       "rsp was 8 bytes off 16-byte alignment at every call emitted inside
-      an expression".
-- [ ] At the bump, re-run `cyrius deps` — the aarch64 syscall peer moved
+      an expression". **Disassembled at v0.7.3**: landing is `lea r13,[rsp]`,
+      `sub rsp,8`, frame `0x20`, and `mov rsp,r13; ret` on return.
+- [x] At the bump, re-run `cyrius deps` — the aarch64 syscall peer moved
       SYS_UNLINKAT 35 → 263, so an un-re-vendored peer's sys_unlink would
-      run nanosleep.
+      run nanosleep. **Not applicable at v0.7.3**: gnoboot vendors no syscall
+      peer, and `lib/fnptr.cyr` was re-vendored from the 6.6.20 snapshot.
 
 ## v1.0 criteria
 
@@ -456,8 +470,9 @@ with AGNOS as the canonical consumer.
 
 ## Moving the cyrius pin to 6.6.6
 
-**Current pin: `cyrius = "6.6.2"`** — four releases behind. Nothing must change first;
-this is a pin bump and a rebuild.
+Shipped at v0.7.3, which went past this target to 6.6.20. This assessment was right
+for 6.6.6; the one thing that did have to change arrived later, at 6.6.20 (see
+*Restoring `stdlib = ["fnptr"]`* above). Kept as the record of what was checked.
 
 **What was checked** (the two `.cyr` in `src/`: `main.cyr` and `test.cyr`):
 

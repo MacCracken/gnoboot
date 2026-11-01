@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "gnoboot — AGNOS sovereign UEFI bootloader"
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.6.2"
+cyrius = "6.6.20"
 
 [build]
 entry = "src/main.cyr"
@@ -20,4 +20,15 @@ output = "BOOTX64.EFI"
 # v6.0.1: explicit fnptr declaration so `cyrius deps` vendors
 # lib/fnptr.cyr into gnoboot/lib/. Belt-and-suspenders against
 # future cycc-side stdlib-fallback regressions.
-stdlib = ["fnptr"]
+#
+# v0.7.3: DISABLED, not retired. Restore it once cyrius fixes the bug below.
+# 6.6.20 refuses `fn fncallN` outside an included file named fnptr.cyr. A lone
+# `stdlib = ["fnptr"]` makes fnptr the FIRST prelude include, directly behind
+# `#@pkgver`, whose declaration has no trailing newline; the `#@file` marker
+# lands mid-line, the file map misses it, and fnptr reads as `<source>`. Build,
+# test, bench and fuzz all fail. src/main.cyr's own include is sufficient, and
+# lib/fnptr.cyr stays vendored and tracked.
+# Do NOT run a bare `cyrius lib sync` or `cyrius update` here: with nothing
+# declared, sync dumps the full 113-file snapshot, and update ignores the pin.
+# To re-vendor: uncomment, `cyrius lib sync`, re-comment.
+# stdlib = ["fnptr"]

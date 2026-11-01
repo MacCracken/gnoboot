@@ -3,11 +3,30 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
+> **Last refresh**: 2026-11-01 (**v0.7.3 cut** — pin `6.6.2` → `6.6.20`, **not inert**: image 37,376 → 35,328 bytes; version bump itself one byte at `0x401A`. Fixed the banner 0.7.2 left at `v0.7.1`. `stdlib = ["fnptr"]` commented out to work around a cyrius bug. All local gates green; awaiting user tag, not iron-tested. Found CI's boot gates SKIP). Prior: 2026-09-11 (**v0.7.2 cut** — pin `6.5.36` → `6.6.2`; this file was not refreshed at that cut, the entry below was backfilled at v0.7.3). Prior: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.7.1** — cut 2026-08-29 (awaiting user tag). Pin bump + **M4** + the bug
+**0.7.3** — cut 2026-11-01 (awaiting user tag). Toolchain pin bump plus the
+banner fix 0.7.2 missed. No ABI change.
+
+**Pin `6.6.2` → `6.6.20`, and this one is not inert.** The image drops
+37,376 → 35,328 bytes (byte lists baked, 6.6.16), the entry sequence changes
+(UEFI alignment, 6.6.5), and `fncall2` goes dead (bare-statement lowering, 6.6.5).
+The version bump alone is one byte, `0x401A`. See § Binary.
+
+**⚠ Three things worth knowing about this cut:**
+
+1. **The `0.7.2` binary prints `v0.7.1`** and fails `ovmf_smoke.sh`. It boots fine;
+   only the string was wrong.
+2. **`stdlib = ["fnptr"]` is commented out**, working around a cyrius bug still
+   present at 6.7.18. See § Dependencies, and § Toolchain before touching `lib/`.
+3. **CI runs no boot gate.** See § Open. That is how (1) shipped green.
+
+Prior — **0.7.2** — cut 2026-09-11, tagged `0.7.2`. Pin `6.5.36` → `6.6.2`, plus
+test-harness rework. The banner was not bumped.
+
+Prior — **0.7.1** — cut 2026-08-29 (never tagged). Pin bump + **M4** + the bug
 M4 found.
 
 **Pin `6.5.35` → `6.5.36`, measured at zero bytes.** `lib/fnptr.cyr` is
@@ -139,7 +158,12 @@ change.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.5.36` (in `cyrius.cyml [package].cyrius`) — advanced from
+- **Cyrius pin**: `6.6.20` (in `cyrius.cyml [package].cyrius`) — advanced from
+  `6.6.2` at the **v0.7.3** cut. Deliberately not latest: `~/.cyrius/current`
+  is `6.7.18`, and the `cyrius` wrapper dispatches on the pin, so `cyrius
+  --version` here reports `6.6.20`. **Not measured inert**, unlike the two bumps
+  below: 6.6.5 and 6.6.16 both change the emitted image (see § Binary).
+- **Prior pin** `6.5.36` — advanced from
   `6.5.35` at the **v0.7.1** cut. **Measured inert**: `lib/fnptr.cyr` is
   byte-identical between the 6.5.35 and 6.5.36 snapshots (`fncall2`'s live body
   included), and pre-/post-bump binaries differ in zero bytes. Pin,
@@ -182,45 +206,66 @@ change.
       opposite reason: the check keys on `[package] name`, precisely so that
       downstream repos which also build from `src/main.cyr` — gnoboot among
       them — are not silently exempted from it.)
+    - 6.6.5 — UEFI entry alignment. The landing parks the entry rsp
+      (`lea r13,[rsp]`), seeds `sub rsp,8`, uses a `0x20` trampoline frame
+      (was `0x28`), and returns with `mov rsp,r13; ret`. Also lowers
+      bare-statement `fncallN`, which is what killed the last live `fncall2`.
+    - 6.6.16 — byte lists are baked into the image instead of stored by code at
+      entry; values hold from the first instruction. Drops 2 KB.
+    - 6.6.20 — **a hard constraint, not a feature.** `fn fncall0..8` is refused
+      outside an included file named `fnptr.cyr`. See § Dependencies for how
+      that collides with gnoboot's manifest.
 
-**Re-vendoring `lib/`**: `cyrius lib sync` vendors from the **manifest
-pin**, not the installed wrapper. Bump `[package].cyrius` first, then
-sync — otherwise the sync silently re-vendors the old snapshot and
-reports success. Do not pass `--full`: gnoboot declares
-`[deps] stdlib = ["fnptr"]`, and `--full` would dump the whole 108-file
-snapshot into a deliberately one-file `lib/`.
+**Re-vendoring `lib/`** ⛔ **changed at v0.7.3.** `fnptr` is undeclared while the
+cyrius bug in § Dependencies stands, and with nothing declared the usual verbs
+are destructive:
+
+- **Bare `cyrius lib sync` copies the whole 113-file snapshot** into the
+  deliberately one-file `lib/`, because an empty declaration means "full".
+- **`cyrius update` does the same from the wrong toolchain.** It ignores the pin
+  and copies `~/.cyrius/current`'s snapshot (observed: 6.7.18 under a 6.6.20 pin),
+  including over `lib/fnptr.cyr`. This is true with `fnptr` declared as well.
+  Never run it here.
+
+To re-vendor: bump `[package].cyrius` first, uncomment `stdlib = ["fnptr"]`, run
+`cyrius lib sync`, then re-comment the line. The pin must move first, because sync
+vendors from the **manifest pin** and otherwise silently re-vendors the old
+snapshot. Do not pass `--full`.
 
 ## Binary
 
-- **`build/BOOTX64.EFI`**: 37,376 bytes at v0.7.1 — unchanged by the pin bump
-  (zero-byte delta) and by the struct growth (the extra 8 bytes are a larger
-  `var boot_info[16]` slot, not emitted instructions). PE32+ EFI Application, x86_64,
-  subsystem 0x000A, `DllCharacteristics` 0x0140 = NX_COMPAT +
-  DYNAMIC_BASE, `.reloc` populated).
-- Since cyrius 6.5.17 the `fncallN` call sequences are **emitted inline**
-  at **25 of** gnoboot's 28 firmware-call sites rather than calling the
-  `lib/fnptr.cyr` trampolines. The lowering fires in *expression* position
-  only, so the three statement-position, result-discarded calls
-  `fncall2(fn_setmode, …)` at `src/main.cyr:547`, `:549`, `:596` still
-  `call` the vendored `fncall2` body (three `call 0x1400010c2` sites in the
-  image). **`lib/fnptr.cyr` is therefore still live code on the boot path**
-  — those three run pre-EBS whenever `LocateProtocol(GOP)` succeeds.
-- The build's `note: 8 unreachable fns (1241 bytes)` covers eight of the
-  **nine** vendored bodies: `CYRIUS_DCE_VERBOSE=1` lists `fncall0`,
-  `fncall1`, `fncall3`..`fncall8`. `fncall2` is live. The 8-vs-9 gap is the
-  quickest way to re-check this after any toolchain bump — if it ever reads
-  `9 unreachable`, the three `SetMode` calls were lowered too.
-- **Entry**: cyrius e9 jmp prologue at `.text+0`, jumps to auto-trampoline
-  that captures `RCX → R14`, `RDX → R15`, then `call efi_main` (MS x64 ABI)
-- **Banner storage note**: `var foo[N] = { ... }` byte-array literals are
-  emitted as per-byte `mov byte [rcx+N], imm8` stores, **not** as a data
-  blob. Grepping the binary for the UTF-16LE banner string finds nothing
-  — there is no contiguous copy of it. The OVMF runtime gate is the only
-  way to verify the banner; a static byte-scan cannot.
+- **`build/BOOTX64.EFI`**: 35,328 bytes at v0.7.3 (was 37,376). The 2 KB drop is
+  cyrius 6.6.16 baking byte lists into the image. The version bump itself is
+  **exactly one byte** against the same-compiler build: file offset `0x401A`, the
+  banner's patch digit. PE32+ EFI Application, x86_64, subsystem 0x000A,
+  `DllCharacteristics` 0x0140 = NX_COMPAT + DYNAMIC_BASE, `.reloc` populated.
+- **`.rdata` is writable** (`0xC0000040`, R+W, no X) and holds gnoboot's globals
+  despite the name, so `efi_fail`'s in-place patch of `msg_fail` still works
+  now that the template is baked. `.text` stays R+X, not W.
+- Since cyrius 6.6.5 the `fncallN` call sequences are **emitted inline at every
+  firmware-call site**, the three bare-statement `SetMode` calls included (those
+  were the holdouts from 6.5.17, which lowered expression position only). No
+  direct `call` reaches the `lib/fnptr.cyr` bodies. **`lib/fnptr.cyr` is
+  therefore no longer live code on the boot path**; it is needed only so
+  `FINDFN` succeeds, which is what enables the lowering.
+- The build's `note: 9 unreachable fns (1352 bytes)` covers all **nine**
+  vendored bodies, `fncall0`..`fncall8`, per `CYRIUS_DCE_VERBOSE=1`. This is the
+  transition this file previously told readers to watch for. If it ever reads
+  fewer than 9, something started reaching a body again.
+- **Entry**: cyrius e9 jmp prologue at `.text+0`, jumps to the landing, which
+  parks the entry rsp in `r13`, seeds `sub rsp,8`, captures `RCX → R14` and
+  `RDX → R15`, opens a `0x20` frame, then `call efi_main` (MS x64 ABI). A return
+  goes through `mov rsp,r13; ret`.
+- **Banner storage note** ⚠ reversed at v0.7.3. `var foo[N] = { ... }` byte
+  lists are now a contiguous blob in `.rdata`: the banner is at file offset
+  `0x4000`, `msg_fail` at `0x4050`, and `boot_info` at `0x41D0`. So the `AGNO`
+  magic is **data**, not an immediate; searching a disassembly for `0x41474e4f`
+  finds nothing. A static byte-scan **can** now check the banner, though
+  the OVMF gate is still what proves it prints.
 
 ## Source
 
-- `src/main.cyr` — single file, ~975 lines (740 before the v0.7.0
+- `src/main.cyr` — single file, ~1,020 lines (740 before the v0.7.0
   hardening). UTF-16LE message constants (one `msg_pre` banner + one
   shared `msg_fail` template + **17** per-stage `code_*` codes — v0.7.0
   added `GI` / `PHN` / `SZ` / `SHR`), EFI GUIDs (LoadedImage + SimpleFileSystem
@@ -240,9 +285,11 @@ snapshot into a deliberately one-file `lib/`.
     - `efi_main` tail: `var p = &boot_info;` → `movabs rax, &boot_info`,
       then asm `mov rdi, rax`, then `var jt = kernel_jump_target;` must be
       a plain `mov rax,[rbp-N]` that **does not touch RDI**, then asm
-      `jmp rax`. Re-confirmed at the **v0.7.0** cut: `mov rdi,rax` →
-      `mov rax,[rbp-0x198]` → `mov [rbp-0x388],rax` → `jmp rax`. The extra
+      `jmp rax`. Re-confirmed at the **v0.7.3** cut: `mov rdi,rax` →
+      `mov rax,[rbp-0x198]` → `mov [rbp-0x3a0],rax` → `jmp rax`. The extra
       store is `jt`'s own stack slot — it writes the stack, never RDI.
+    - `rdrand_u64` was re-confirmed at the same cut, unchanged. Since 6.6.5 the
+      landing is a third thing to check: see **Entry** in § Binary.
 - `var foo[N]` sizes are in **u64 slots** — `N` × 8 bytes, not `N` bytes.
   `msg_pre[10]` = 80 bytes and the banner uses all 80. A version string
   one character longer (e.g. `0.6.9` → `0.6.10`) needs `N = 11`.
@@ -291,26 +338,37 @@ snapshot into a deliberately one-file `lib/`.
 
 Direct (declared in `cyrius.cyml`):
 
-- stdlib — `lib/fnptr.cyr` (`fncall1`–`fncall5` for MS x64 firmware-call
-  dispatch). Vendored from the pinned snapshot via `cyrius lib sync`;
-  never hand-edited. Since the 6.5.17 lowering most call sites no longer
-  reach it, **but it is not inert**: `fncall2`'s body is still called three
-  times on the boot path (see § Binary). After any `cyrius lib sync`,
-  re-diff `fncall2`'s body specifically — a whole-file diff that looks
-  comment-only can still hide a change to the one body that executes. No
-  other stdlib deps; a UEFI Application is freestanding.
+None declared since v0.7.3. `src/main.cyr` includes one stdlib module directly:
 
-**Known, out of scope — the test target does not build.** `src/test.cyr`
-includes `lib/syscalls.cyr`, which is neither vendored nor in
-`[deps].stdlib`; it compiles only via a compiler-side stdlib fallback, and
-even then `cyrius test` warns `undefined function 'alloc'`. Neither
-release gate touches this path — `verify_pe.sh` and `ovmf_smoke.sh` both
-work off `build/BOOTX64.EFI` — so it has never blocked a release, and it
-was already broken at the 6.2.44 pin (this is not a 6.5.35 regression).
-Declaring `"syscalls"` would grow `lib/` from 1 file to 8 (`syscalls.cyr`
-plus six per-OS/per-arch peers), which is why it has been left alone. The
-real choice is: declare the deps and get `cyrius test` green, or delete
-`src/test.cyr` + `tests/gnoboot.tcyr` and drop `[build].test`. Unresolved.
+- stdlib — `lib/fnptr.cyr` (`fncall0`–`fncall8`, the definitions that enable the
+  compiler's inline MS x64 firmware-call lowering). Vendored from the `6.6.20`
+  snapshot and tracked in git; never hand-edited. Since 6.6.5 no call site
+  reaches its bodies (see § Binary), so a change there is no longer a boot-path
+  change. The `6.6.2` → `6.6.20` delta was comment-only anyway. No other stdlib
+  deps; a UEFI Application is freestanding.
+
+**⛔ `stdlib = ["fnptr"]` is commented out in `cyrius.cyml` — a workaround for a
+cyrius bug, present at 6.6.20 and still at 6.7.18.** With it declared, build,
+test, bench and fuzz all fail with `reserved intrinsic name 'fncall0'`. The
+mechanism: `PP_EMIT_PKGVER` writes `var CYRIUS_PKG_VERSION = "…";` with no trailing
+newline, so when the first prelude line is an `include`, that file's `#@file`
+marker lands mid-line and `FM_BUILD` never registers it. The file reads as
+`<source>`, and 6.6.20's exemption for files named `fnptr.cyr` does not apply.
+Every consumer loses attribution on its first prelude include, but only gnoboot
+has `fnptr` there, because `fnptr` is its only dep. Any line in between (even a
+blank one) avoids it, and reordering is not available with one dep.
+
+The workaround costs nothing at build time: `--no-deps` and the undeclared form
+produce the same image. What it costs is the automatic re-vendor, so see
+§ Toolchain before touching `lib/`. Tracked in the roadmap.
+
+**The test target builds again** (it did not through v0.7.1). `cyrius test`,
+`bench` and `fuzz` all pass at 6.6.20, on smoke-level cases only. They and
+`src/test.cyr` reach stdlib modules that are not vendored, through the
+compiler-side fallback to the pinned snapshot; that is deliberate, because
+vendoring them would grow the one-file `lib/`. Neither release gate touches
+this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
+`build/BOOTX64.EFI`.
 
 ## Audit
 
@@ -383,6 +441,18 @@ real choice is: declare the deps and get `cyrius test` green, or delete
 
 ## Verified
 
+- **v0.7.3 gates** (QEMU OVMF, 2026-11-01, **local only** — see § Open): build clean
+  under cyrius 6.6.20 with the pin matching; two builds reproduce
+  `ec7393fc9ca1b02b…`. Structural PASS. OVMF runtime PASS —
+  `gnoboot v0.7.3: handing off to kernel`, booting real agnos 1.57.14.
+  `malformed_kernel.sh` **18/18**, which is also the proof that `msg_fail` stayed
+  patchable once baked. `multi_ptload.sh` **PASS**. `cyrius test`, `bench`, `fuzz`
+  green. `ud2 ud2` clean. Disassembled: the landing (§ Binary), `rdrand_u64`, and
+  the handoff tail; nothing between `mov rdi,rax` and `jmp rax` writes RDI. `boot_info`
+  header read from the image: `0x41474E4F`, version 2, `struct_size` `0x80`.
+- ⚠ **v0.7.3 is not iron-validated**, and that matters more than usual: 6.6.5
+  changed the entry sequence every firmware call runs under, and cyrius's own
+  notes say OVMF tolerates a misaligned CALL. **Run it on the next agnos burn.**
 - **v0.7.1 gates** (QEMU OVMF, 2026-08-29): build clean under cyrius 6.5.36 with
   the pin matching (no drift warning). Structural PASS. OVMF runtime PASS —
   `gnoboot v0.7.1: handing off to kernel`, booting the real agnos ELF64.
@@ -433,6 +503,14 @@ real choice is: declare the deps and get `cyrius test` green, or delete
 
 ## Open
 
+- **⚠ CI runs no boot gate — all three SKIP and report success.** Found at the
+  v0.7.3 cut. `tests/ovmf_smoke.sh` probes `/usr/share/OVMF/OVMF_CODE.fd`, but
+  Ubuntu noble's `ovmf` package ships only `OVMF_CODE_4M.fd`, so the script exits 0
+  at its SKIP branch; the CI step for it took 0 seconds at `3ef5ad3`. That is how
+  the stale `v0.7.1` banner got a green `0.7.2` release. The path is half the fix:
+  CI also has no agnos ELF, and the default 4-byte stub fails before the banner
+  prints, so fixing the probe alone turns the gate red. Until this closes, local
+  gates are the only boot evidence, and a green tag proves structure only.
 - **Audit F8 — the memory map cannot grow.** `mm_buf` is a fixed 16 KB and the
   size passed to `GetMemoryMap` matches it exactly, so it fails *closed* rather
   than truncating (audit S2, sound). But a machine whose map exceeds ~340

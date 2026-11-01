@@ -6,6 +6,64 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-11-01
+
+Toolchain pin-bump patch release, `6.6.2` → `6.6.20`. No ABI change: magic `'AGNO'`,
+struct version `2`, `struct_size 0x80` and `RDI = &boot_info` are untouched.
+
+**Measured, not assumed.** Unlike the last two pin bumps this one is **not** inert: the
+compiler changes the image, 37,376 → **35,328 bytes**. The version bump on top of that is
+exactly **one byte** against a same-compiler build: file offset `0x401A`, the banner's
+patch digit.
+
+### Fixed
+
+- **The boot banner has read the wrong version since 0.7.2.** The 0.7.2 cut bumped `VERSION`
+  but not `msg_pre`, so the shipped `0.7.2` binary prints `gnoboot v0.7.1: handing off to
+  kernel` and fails `tests/ovmf_smoke.sh`, whose expected string derives from `VERSION`. The
+  boot itself was unaffected: that binary reaches the AGNOS shell. Fixed at this cut.
+
+### Changed
+
+- **Toolchain `6.6.2` → `6.6.20`.** Three of the intervening changes matter here:
+  - **6.6.5 — UEFI entry alignment.** Firmware calls ran with rsp 8 bytes off 16-byte
+    alignment. The landing now parks the entry rsp (`lea r13,[rsp]`), seeds `sub rsp,8`,
+    opens a `0x20` frame (was `0x28`), and returns through `mov rsp,r13; ret`. This is the
+    headline fix for a bootloader, and it changes the code every firmware call runs under.
+  - **6.6.5 — bare-statement `fncallN` is lowered inline.** The last three `fncall2` `SetMode`
+    calls stopped calling the vendored body, so the build's note moved from 8 to **9
+    unreachable fns**. `lib/fnptr.cyr` is no longer live code on the boot path.
+  - **6.6.16 — byte lists are baked into the image**, which is the 2 KB. The banner, `msg_fail`
+    and `boot_info` are now data in `.rdata` rather than stores run at entry, so the `AGNO`
+    magic is no longer an immediate in `.text`. `.rdata` is writable, so `efi_fail`'s in-place
+    patch still works; `malformed_kernel.sh` exercises it.
+- **`lib/fnptr.cyr` re-vendored from the 6.6.20 snapshot.** Comment-only delta; every
+  non-comment line, `fncall2`'s body included, is unchanged.
+- **`stdlib = ["fnptr"]` is commented out in `cyrius.cyml`.** This works around a cyrius bug
+  present at 6.6.20 and still at 6.7.18. 6.6.20 refuses `fn fncallN` outside an included file
+  named `fnptr.cyr`, and the `#@pkgver` declaration has no trailing newline, so the first
+  prelude include's `#@file` marker lands mid-line and that file reads as `<source>`. `fnptr`
+  is gnoboot's only dep, so it always sits there, and build, test, bench and fuzz all failed
+  with `reserved intrinsic name 'fncall0'`. `src/main.cyr`'s own include is sufficient and
+  `lib/fnptr.cyr` stays vendored, so the build command is unchanged. **Re-vendoring is now
+  manual, and a bare `cyrius lib sync` dumps the full 113-file snapshot**: see `state.md`
+  § Toolchain. The roadmap tracks restoring the line.
+
+### Known issues
+
+- **CI's three boot gates SKIP and report success.** `tests/ovmf_smoke.sh` probes
+  `OVMF_CODE.fd`, Ubuntu noble ships `OVMF_CODE_4M.fd`, and the two kernel gates have no agnos
+  ELF. That is how the stale banner got a green `0.7.2` release. Everything below was run
+  locally, not in CI.
+
+### Verified
+
+Structural PASS. OVMF runtime PASS booting real agnos 1.57.14. `malformed_kernel.sh` **18/18**.
+`multi_ptload.sh` PASS. `cyrius test`, `bench` and `fuzz` green. `ud2 ud2` clean. Entry
+landing, `rdrand_u64` and the handoff tail re-disassembled: nothing between `mov rdi,rax` and
+`jmp rax` writes RDI. **Not run on iron**, which matters more than usual here because the entry
+sequence changed.
+
 ## [0.7.2] - 2026-09-11
 
 ### Changed
