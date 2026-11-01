@@ -28,14 +28,16 @@ EFI="${1:-$ROOT/build/BOOTX64.EFI}"
 GNOBOOT_VERSION="$(cat "$(dirname "$0")/../VERSION" 2>/dev/null | tr -d '[:space:]')"
 EXPECT="${EXPECT:-gnoboot v${GNOBOOT_VERSION}: handing off to kernel}"
 
-# OVMF firmware paths differ between distros — probe both common
+# OVMF firmware paths differ between distros — probe the common
 # locations. Arch: edk2-ovmf installs to /usr/share/edk2-ovmf/x64/
-# with `.4m.fd` suffix. Ubuntu: ovmf installs to /usr/share/OVMF/
-# without the `.4m.fd` suffix. First match wins.
+# with `.4m.fd` suffix. Ubuntu: ovmf installs to /usr/share/OVMF/ as
+# `_4M.fd` since noble, unsuffixed before it. First match wins, and the
+# two lists must stay in the same order so CODE and VARS sizes pair up.
 OVMF_CODE=""
 OVMF_VARS_SRC=""
 for c in \
     /usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd \
+    /usr/share/OVMF/OVMF_CODE_4M.fd \
     /usr/share/OVMF/OVMF_CODE.fd \
     /usr/share/qemu/OVMF.fd \
     ; do
@@ -43,17 +45,22 @@ for c in \
 done
 for v in \
     /usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd \
+    /usr/share/OVMF/OVMF_VARS_4M.fd \
     /usr/share/OVMF/OVMF_VARS.fd \
     ; do
     if [ -f "$v" ]; then OVMF_VARS_SRC="$v"; break; fi
 done
 
-# Tooling probes — graceful SKIP shape mirrors cyrius check.sh.
+# Tooling probes. ⛔ Exit 77 means "did not run", and it is NOT a pass. These
+# used to exit 0, so a CI runner missing a firmware file reported every boot
+# gate green from a step that took 0 seconds, and malformed_kernel.sh would
+# have counted each inner SKIP as a passed case. Any non-zero exit fails a CI
+# step, so a gate that cannot run can no longer look like one that passed.
 for tool in qemu-system-x86_64 parted mformat mmd mcopy; do
-    command -v "$tool" >/dev/null 2>&1 || { echo "SKIP: $tool not in PATH"; exit 0; }
+    command -v "$tool" >/dev/null 2>&1 || { echo "SKIP: $tool not in PATH"; exit 77; }
 done
-[ -n "$OVMF_CODE" ]     || { echo "SKIP: OVMF_CODE.fd not found (tried Arch + Ubuntu paths)"; exit 0; }
-[ -n "$OVMF_VARS_SRC" ] || { echo "SKIP: OVMF_VARS.fd not found"; exit 0; }
+[ -n "$OVMF_CODE" ]     || { echo "SKIP: OVMF_CODE.fd not found (tried Arch + Ubuntu paths)"; exit 77; }
+[ -n "$OVMF_VARS_SRC" ] || { echo "SKIP: OVMF_VARS.fd not found"; exit 77; }
 [ -f "$EFI" ] || { echo "ERROR: $EFI not found — run \`CYRIUS_TARGET_EFI=1 cyrius build src/main.cyr build/BOOTX64.EFI\` first" >&2; exit 1; }
 
 D=$(mktemp -d -t gnoboot-smoke.XXXXXX)

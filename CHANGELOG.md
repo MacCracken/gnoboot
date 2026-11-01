@@ -6,6 +6,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-11-01
+
+Real boot gates in CI. No code path in the bootloader changed and there is no ABI change;
+against the 0.8.1 image the binary differs by **one byte**, the banner's patch digit at
+`0x401A`.
+
+### Fixed
+
+- **CI ran no boot gate, and all three reported success.** `tests/ovmf_smoke.sh` probed
+  `OVMF_CODE.fd`, but Ubuntu noble ships `OVMF_CODE_4M.fd`, so the smoke step exited 0 at its
+  SKIP branch in 0 seconds. The script now probes the `_4M` names.
+- **A boot gate could report PASS without booting.** `malformed_kernel.sh` and `multi_ptload.sh`
+  treated `ovmf_smoke.sh`'s exit status as the result, and its SKIP exited 0. With QEMU absent and
+  a kernel present, `malformed_kernel.sh` printed `gate: PASS` and exited 0 with nothing booted.
+  Measured with QEMU hidden from `PATH`, old scripts against new.
+
+### Changed
+
+- **A gate that cannot run now exits 77, not 0.** Any non-zero exit fails a CI step, so a gate
+  that did not run can no longer look like one that passed. `malformed_kernel.sh` and
+  `multi_ptload.sh` pass an inner 77 through. Local runs still print `SKIP`, but anything that
+  reads these scripts' exit status will now see 77.
+- **CI boots a real kernel.** New `tests/fetch_agnos.sh` downloads the `agnos-x86_64` release
+  asset and checks it against that release's `SHA256SUMS`, then CI passes it as `AGNOS_KERNEL`.
+  The version is pinned in new `tests/AGNOS_VERSION`, so a kernel release cannot move CI
+  unannounced. The two kernel gates are per-push gates now, not local-only.
+- **`multi_ptload.sh` gets `QEMU_TIMEOUT=60` in CI.** Its marker takes about 8 s on a fast host
+  against a 25 s default, the tightest margin of the three. QEMU always runs to its deadline, so
+  this step costs 2 minutes.
+- **`tests/verify_pe.sh` asserts the banner matches `VERSION`.** Byte lists have been plain data
+  since cyrius 6.6.16, so this needs no QEMU. It fails on a bumped `VERSION` with a stale banner,
+  which is the 0.7.2 mistake.
+
+### Verified
+
+Locally: structural PASS, OVMF runtime PASS on real agnos 1.57.14, `malformed_kernel.sh`
+**18/18**, `multi_ptload.sh` PASS, `cyrius test`, `bench` and `fuzz` green. The same gates also
+pass in a simulation of the runner: Ubuntu noble's `dash` and OVMF firmware, the fetched kernel,
+and CI's step order. **Not yet proven in CI itself**, which needs a push, and **not run on iron.**
+
 ## [0.8.1] — 2026-11-01
 
 Toolchain pin bump, `6.7.9` → `6.7.18`, the latest release. No ABI change: magic `'AGNO'`,

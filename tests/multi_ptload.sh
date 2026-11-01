@@ -40,10 +40,10 @@ SRC_KERNEL="${AGNOS_KERNEL:-$ROOT/../agnos/build/agnos}"
 # page — kybernet launches after the scheduler is live.
 MARKER="${MARKER:-Launching kybernet}"
 
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: python3 not in PATH"; exit 0; }
+command -v python3 >/dev/null 2>&1 || { echo "SKIP: python3 not in PATH"; exit 77; }
 [ -f "$SRC_KERNEL" ] || {
     echo "SKIP: no agnos kernel at $SRC_KERNEL — this gate splits a real ELF64"
-    exit 0
+    exit 77
 }
 
 D=$(mktemp -d -t gnoboot-multiph.XXXXXX)
@@ -101,10 +101,17 @@ PYEOF
 run_case() {
     label="$1"; kernel="$2"
     printf '  %-24s expect "%s" ... ' "$label" "$MARKER"
-    if AGNOS_KERNEL="$kernel" EXPECT="$MARKER" QEMU_TIMEOUT="${QEMU_TIMEOUT:-25}" \
-       "$ROOT/tests/ovmf_smoke.sh" >"$D/log" 2>&1; then
+    rc=0
+    AGNOS_KERNEL="$kernel" EXPECT="$MARKER" QEMU_TIMEOUT="${QEMU_TIMEOUT:-25}" \
+        "$ROOT/tests/ovmf_smoke.sh" >"$D/log" 2>&1 || rc=$?
+    if [ "$rc" -eq 0 ]; then
         echo "PASS"
         return 0
+    fi
+    if [ "$rc" -eq 77 ]; then
+        echo "SKIP"
+        sed -n '1p' "$D/log"
+        exit 77
     fi
     echo "FAIL"
     sed -n '1,25p' "$D/log" | sed 's/^/    /'

@@ -22,19 +22,19 @@
 #   tests/malformed_kernel.sh                    # uses ../agnos/build/agnos
 #   AGNOS_KERNEL=/path/to/agnos tests/malformed_kernel.sh
 #
-# Requires: python3, plus everything ovmf_smoke.sh requires (it SKIPs
-# gracefully when QEMU/OVMF tooling is absent, and so does this).
+# Requires: python3, plus everything ovmf_smoke.sh requires. Exits 77 ("did
+# not run", not a pass) when any of it is absent, as ovmf_smoke.sh does.
 
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_KERNEL="${AGNOS_KERNEL:-$ROOT/../agnos/build/agnos}"
 
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: python3 not in PATH"; exit 0; }
+command -v python3 >/dev/null 2>&1 || { echo "SKIP: python3 not in PATH"; exit 77; }
 [ -f "$SRC_KERNEL" ] || {
     echo "SKIP: no agnos kernel at $SRC_KERNEL — this gate mutates a real ELF64"
     echo "      (a synthetic 4-byte stub cannot exercise program-header parsing)"
-    exit 0
+    exit 77
 }
 
 D=$(mktemp -d -t gnoboot-malformed.XXXXXX)
@@ -61,16 +61,26 @@ $body
 open(sys.argv[2], 'wb').write(d)
 PYEOF
     printf '  %-22s expect "%s" ... ' "$name" "$code"
-    if AGNOS_KERNEL="$out" EXPECT="gnoboot: fail @ $code" QEMU_TIMEOUT="${QEMU_TIMEOUT:-12}" \
-       "$ROOT/tests/ovmf_smoke.sh" >"$D/log.$name" 2>&1; then
-        echo "PASS"
-        PASS=$((PASS + 1))
-    else
-        echo "FAIL"
-        echo "    ---- ConOut ----"
-        sed -n '1,12p' "$D/log.$name" | sed 's/^/    /'
-        FAIL=$((FAIL + 1))
-    fi
+    rc=0
+    AGNOS_KERNEL="$out" EXPECT="gnoboot: fail @ $code" QEMU_TIMEOUT="${QEMU_TIMEOUT:-12}" \
+        "$ROOT/tests/ovmf_smoke.sh" >"$D/log.$name" 2>&1 || rc=$?
+    case "$rc" in
+        0)
+            echo "PASS"
+            PASS=$((PASS + 1))
+            ;;
+        77)
+            echo "SKIP"
+            sed -n '1p' "$D/log.$name"
+            exit 77
+            ;;
+        *)
+            echo "FAIL"
+            echo "    ---- ConOut ----"
+            sed -n '1,12p' "$D/log.$name" | sed 's/^/    /'
+            FAIL=$((FAIL + 1))
+            ;;
+    esac
 }
 
 echo "malformed-kernel gate: $SRC_KERNEL"

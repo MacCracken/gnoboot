@@ -4,7 +4,7 @@
 > [`state.md`](state.md), history in [`CHANGELOG.md`](../../CHANGELOG.md). Shipped
 > work does not stay here.
 
-**Released: 0.8.1.** Next: **0.8.2**.
+**Released: 0.8.1.** Next: **0.8.2**, implemented and awaiting its first real CI run.
 
 | Release | Theme | Closes |
 |---|---|---|
@@ -20,20 +20,21 @@ All three CI boot gates SKIP and report success; the smoke step took 0 seconds a
 `3ef5ad3`. That is how the stale `v0.7.1` banner got a green `0.7.2` release.
 `release.yml` gates on `ci.yml`, so fixing CI covers tagged releases too.
 
-- [ ] `tests/ovmf_smoke.sh` probes the `_4M` firmware names Ubuntu actually ships
+- [x] `tests/ovmf_smoke.sh` probes the `_4M` firmware names Ubuntu actually ships
       (`OVMF_CODE_4M.fd`, `OVMF_VARS_4M.fd`). `malformed_kernel.sh` and
       `multi_ptload.sh` go through this script, so they inherit the fix.
-- [ ] CI fetches the `agnos-x86_64` release asset, checks it against that release's
+- [x] CI fetches the `agnos-x86_64` release asset, checks it against that release's
       `SHA256SUMS`, and passes it as `AGNOS_KERNEL`. The agnos version is pinned in
-      one place, so a kernel release cannot move gnoboot's CI unannounced.
-- [ ] A gate that cannot run fails under CI instead of exiting 0. SKIP stays
-      available for local runs.
-- [ ] `tests/verify_pe.sh` asserts the banner in the image matches `VERSION`.
+      `tests/AGNOS_VERSION`, so a kernel release cannot move gnoboot's CI unannounced.
+- [x] A gate that cannot run exits 77, which fails a CI step, instead of exiting 0.
+      It still prints SKIP for local runs.
+- [x] `tests/verify_pe.sh` asserts the banner in the image matches `VERSION`.
       Byte lists have been plain data since cyrius 6.6.16, so this now needs no
       QEMU and catches the 0.7.2 failure in seconds.
 
 **Done when** a CI run shows the three boot gates passing in real time, and a
-deliberately stale banner turns CI red.
+deliberately stale banner turns CI red. The local half is proven; the CI run needs
+a push.
 
 ## 0.8.3 — ET_DYN / KASLR runtime coverage
 

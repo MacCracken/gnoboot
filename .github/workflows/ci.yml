@@ -63,12 +63,19 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             ovmf parted mtools qemu-system-x86
 
+      - name: Fetch agnos kernel (pinned in tests/AGNOS_VERSION)
+        # The boot gates need a real ELF64: the 4-byte stub fails before
+        # the handoff banner prints. Exported as AGNOS_KERNEL, which all
+        # three gates read.
+        run: |
+          kernel="$(sh tests/fetch_agnos.sh)"
+          echo "AGNOS_KERNEL=$kernel" >> "$GITHUB_ENV"
+
       - name: OVMF smoke (banner on ConOut)
         # End-to-end gate: builds a GPT disk with ESP, drops in
         # BOOTX64.EFI, boots under qemu + OVMF, asserts the expected
-        # banner appears on the firmware ConOut serial. The script
-        # SKIPs gracefully if any tooling is missing — but we just
-        # installed it all, so SKIP would itself be a regression.
+        # banner appears on the firmware ConOut serial. A gate that
+        # cannot run exits 77, which fails this step.
         run: sh tests/ovmf_smoke.sh
 
       - name: Malformed-kernel gate (v0.7.0 hardening)
@@ -78,16 +85,16 @@ jobs:
         # v0.7.0 is unexercised code, and an unexercised check is
         # indistinguishable from an absent one — verify_pe.sh and
         # ovmf_smoke.sh both test only the happy path.
-        #
-        # SKIPs when no real agnos ELF64 is available to mutate, which
-        # is the normal case on a runner with no agnos checkout. It is
-        # a local + release gate, not a per-push blocker.
         run: sh tests/malformed_kernel.sh
 
-      - name: Multi-PT_LOAD gate (roadmap M5)
+      - name: Multi-PT_LOAD gate
         # Splits the real kernel's single PT_LOAD into two contiguous
         # ones describing an identical memory layout, and asserts it
-        # boots equivalently. Same SKIP-without-agnos behaviour.
+        # boots equivalently. Its marker takes ~8s on a fast host, about
+        # a third of the local default, so CI gets a longer deadline.
+        # QEMU always runs to the deadline: this step costs 2 minutes.
+        env:
+          QEMU_TIMEOUT: "60"
         run: sh tests/multi_ptload.sh
 
       - name: Upload build artifact

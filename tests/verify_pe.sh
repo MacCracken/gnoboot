@@ -12,6 +12,10 @@
 #   Subsystem  @ 0x9C = 0A 00 LE       (0x000A — IMAGE_SUBSYSTEM_EFI_APPLICATION)
 #   DllChar    @ 0x9E = 00 01 LE       (0x0100 — NX_COMPAT)
 #
+# Also checks the handoff banner in the image against VERSION. msg_pre in
+# src/main.cyr is hand-synced, and 0.7.2 shipped still printing v0.7.1. Byte
+# lists are plain data since cyrius 6.6.16, so this needs no QEMU.
+#
 # Usage:
 #   tests/verify_pe.sh                          # uses build/BOOTX64.EFI
 #   tests/verify_pe.sh /path/to/BOOTX64.EFI     # custom binary
@@ -75,6 +79,16 @@ case "$dllc_hi" in
         FAILED=1
         ;;
 esac
+
+# The banner as UTF-16LE hex: every ASCII byte followed by a zero byte.
+banner="gnoboot v$(tr -d '[:space:]' < "$ROOT/VERSION"): handing off to kernel"
+banner_hex="$(printf '%s' "$banner" | xxd -p | tr -d '\n' | sed 's/../&00/g')"
+if xxd -p "$EFI" | tr -d '\n' | grep -q "$banner_hex"; then
+    printf "  PASS: %-30s = \"%s\"\n" "Banner matches VERSION" "$banner"
+else
+    printf "  FAIL: %-30s \"%s\" not in image\n" "Banner matches VERSION" "$banner"
+    FAILED=1
+fi
 
 if [ "$FAILED" = "1" ]; then
     echo "structural gate: FAIL"

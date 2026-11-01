@@ -3,17 +3,21 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-11-01 (**v0.8.1 cut** — pin `6.7.9` → `6.7.18`, **measured inert**: the compiler-only build is byte-identical to 0.8.0; the version bump is one byte. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.8.0 cut** — pin `6.6.20` → `6.7.9`, **measured inert**: the compiler-only build is byte-identical to 0.7.3; the version bump is two bytes. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.7.3 cut** — pin `6.6.2` → `6.6.20`, **not inert**: image 37,376 → 35,328 bytes; version bump itself one byte at `0x401A`. Fixed the banner 0.7.2 left at `v0.7.1`. `stdlib = ["fnptr"]` commented out to work around a cyrius bug. All local gates green; awaiting user tag, not iron-tested. Found CI's boot gates SKIP). Prior: 2026-09-11 (**v0.7.2 cut** — pin `6.5.36` → `6.6.2`; this file was not refreshed at that cut, the entry below was backfilled at v0.7.3). Prior: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
+> **Last refresh**: 2026-11-01 (**v0.8.2 cut** — real boot gates in CI: OVMF `_4M` paths, a pinned agnos kernel, SKIP exits 77, and a banner-vs-`VERSION` check. One image byte moved. All local gates green plus a runner simulation; awaiting user tag and the first real CI run, not iron-tested). Prior: 2026-11-01 (**v0.8.1 cut** — pin `6.7.9` → `6.7.18`, **measured inert**: the compiler-only build is byte-identical to 0.8.0; the version bump is one byte. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.8.0 cut** — pin `6.6.20` → `6.7.9`, **measured inert**: the compiler-only build is byte-identical to 0.7.3; the version bump is two bytes. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.7.3 cut** — pin `6.6.2` → `6.6.20`, **not inert**: image 37,376 → 35,328 bytes; version bump itself one byte at `0x401A`. Fixed the banner 0.7.2 left at `v0.7.1`. `stdlib = ["fnptr"]` commented out to work around a cyrius bug. All local gates green; awaiting user tag, not iron-tested. Found CI's boot gates SKIP). Prior: 2026-09-11 (**v0.7.2 cut** — pin `6.5.36` → `6.6.2`; this file was not refreshed at that cut, the entry below was backfilled at v0.7.3). Prior: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.8.1** — cut 2026-11-01 (awaiting user tag). Toolchain pin bump, `6.7.9` →
-`6.7.18`, the latest release. No ABI change.
+**0.8.2** — cut 2026-11-01 (awaiting user tag). Real boot gates in CI. No bootloader
+code changed and no ABI change: one image byte, `0x401A`.
 
-**Measured inert.** The unchanged source under 6.7.18 with the re-vendored
-`lib/fnptr.cyr` builds the 0.8.0 image byte for byte. The version bump then moves
-one byte, `0x401A`. The `stdlib = ["fnptr"]` workaround and the CI gap from 0.7.3
-both still stand.
+**⚠ The thing worth knowing about this cut: fetching a kernel alone would have made
+things worse.** A SKIP inside `ovmf_smoke.sh` exited 0, and `malformed_kernel.sh`
+counted that as a pass, so a kernel present with QEMU absent printed `gate: PASS`
+with nothing booted. SKIP now exits **77** everywhere, which fails a CI step on its
+own. **The first real CI run has not happened yet**; see § CI / Release.
+
+Prior — **0.8.1** — cut 2026-11-01, tagged `0.8.1`. Pin `6.7.9` → `6.7.18`, the
+latest release, measured inert against 0.8.0. No ABI change.
 
 Prior — **0.8.0** — cut 2026-11-01, tagged `0.8.0`. Pin `6.6.20` → `6.7.9`, measured
 inert against 0.7.3. No ABI change.
@@ -249,9 +253,9 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
 
 ## Binary
 
-- **`build/BOOTX64.EFI`**: 35,328 bytes at v0.8.1, unchanged since v0.7.3 (37,376
+- **`build/BOOTX64.EFI`**: 35,328 bytes at v0.8.2, unchanged since v0.7.3 (37,376
   before that). The 2 KB drop was cyrius 6.6.16 baking byte lists into the image.
-  The v0.8.1 version bump is **exactly one byte** against the same-compiler build:
+  The v0.8.2 version bump is **exactly one byte** against the same-compiler build:
   file offset `0x401A`, the banner's patch digit (`0x4016` is the minor digit). PE32+
   EFI Application, x86_64, subsystem 0x000A,
   `DllCharacteristics` 0x0140 = NX_COMPAT + DYNAMIC_BASE, `.reloc` populated.
@@ -276,8 +280,8 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
   lists are now a contiguous blob in `.rdata`: the banner is at file offset
   `0x4000`, `msg_fail` at `0x4050`, and `boot_info` at `0x41D0`. So the `AGNO`
   magic is **data**, not an immediate; searching a disassembly for `0x41474e4f`
-  finds nothing. A static byte-scan **can** now check the banner, though
-  the OVMF gate is still what proves it prints.
+  finds nothing. `tests/verify_pe.sh` checks the banner this way since v0.8.2,
+  though the OVMF gate is still what proves it prints.
 
 ## Source
 
@@ -312,15 +316,23 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
 
 ## Tests
 
-- `tests/verify_pe.sh` — fast structural gate (5 PE header fields).
-  Asserts DOS magic, PE sig, COFF Char (no RELOCS_STRIPPED), Subsystem
-  0x000A, DllChar NX_COMPAT bit set.
+- `tests/verify_pe.sh` — fast structural gate (5 PE header fields plus,
+  since v0.8.2, the banner against `VERSION`). Asserts DOS magic, PE sig,
+  COFF Char (no RELOCS_STRIPPED), Subsystem 0x000A, DllChar NX_COMPAT bit set.
 - `tests/ovmf_smoke.sh` — runtime gate. Builds GPT-disk-with-ESP,
   copies `BOOTX64.EFI` + optionally `/boot/agnos`, boots under
-  qemu-system-x86_64 + OVMF + `-cpu max`, greps ConOut serial. SKIPs
-  gracefully when tooling absent. `EXPECT` and `AGNOS_KERNEL` are env
-  hooks — the two v0.7.0 gates below drive it entirely through them, so
-  no disk or QEMU logic is duplicated anywhere in the test tree.
+  qemu-system-x86_64 + OVMF + `-cpu max`, greps ConOut serial. `EXPECT`
+  and `AGNOS_KERNEL` are env hooks — the two v0.7.0 gates below drive it
+  entirely through them, so no disk or QEMU logic is duplicated anywhere in
+  the test tree.
+- **⛔ Exit 77 means "did not run", and it is not a pass.** All three boot
+  gates use it when tooling, firmware or a kernel is missing, and the two
+  outer gates pass an inner 77 through. They exited 0 before v0.8.2.
+- **Timing**, from a fast 16-core host under TCG: banner 2 s (default deadline
+  20 s), `fail @ CODE` 2 s (12 s), `Launching kybernet` 8 s (25 s). QEMU never
+  exits by itself, so every boot takes its full deadline.
+- `tests/fetch_agnos.sh` — downloads the `agnos-x86_64` release asset and checks
+  it against `SHA256SUMS`. The version is pinned in `tests/AGNOS_VERSION`.
 - `tests/malformed_kernel.sh` — **v0.7.0 hardening regression gate**.
   Mutates a real agnos ELF64 one field at a time and boots **18**
   corrupted kernels under OVMF, asserting the specific 4-char failure
@@ -336,16 +348,18 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
   byte changes) and asserts baseline and split both reach
   `Launching kybernet`. Booting the baseline too means an environmental
   failure reports as such rather than being blamed on the split.
-- Both new gates SKIP without a real agnos ELF64 to mutate, so they are
-  local + release gates rather than per-push blockers. Wired into
-  `.github/workflows/ci.yml`.
+- Both run per push since v0.8.2, against the pinned kernel.
 
 ## CI / Release
 
 - `.github/workflows/ci.yml` — every push + PR. Install cyrius
   (canonical install.sh + post-install smoke per the agnos pattern),
-  build with `CYRIUS_TARGET_EFI=1`, run structural + OVMF gates,
-  upload `BOOTX64.EFI` as artifact.
+  build with `CYRIUS_TARGET_EFI=1`, run the structural gate, fetch the
+  pinned agnos kernel, run all three boot gates against it, upload
+  `BOOTX64.EFI` as artifact. Boot steps should take about 6 minutes in total;
+  **a step taking 0 seconds means a gate did not boot.** The first run with
+  these gates had not happened at the v0.8.2 cut, and `ubuntu-latest` speed is
+  unmeasured, so watch `multi_ptload` (`QEMU_TIMEOUT=60` in CI).
 - `.github/workflows/release.yml` — `v?X.Y.Z` tag trigger. CI gate,
   version-verify, build, publish `BOOTX64.EFI` + `gnoboot-X.Y.Z-x86_64-efi.efi`
   + `SHA256SUMS` to GitHub release via `softprops/action-gh-release@v2`.
@@ -458,6 +472,13 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
 
 ## Verified
 
+- **v0.8.2 gates** (QEMU OVMF, 2026-11-01, **not yet in CI**): image `bf67a12de112a358…`.
+  Local: structural PASS, OVMF runtime PASS on real agnos 1.57.14,
+  `malformed_kernel.sh` **18/18**, `multi_ptload.sh` **PASS**, `cyrius test`, `bench`,
+  `fuzz` green. **Runner simulation**, the same gates in CI's step order, under
+  Ubuntu noble's `dash` and OVMF firmware with the fetched kernel: all PASS. Failure
+  paths: with QEMU hidden the old gates exit 0 and the new ones 77; a stale banner
+  fails `verify_pe.sh`; tampered and renamed agnos assets are refused.
 - **v0.8.1 gates** (QEMU OVMF, 2026-11-01, **local only** — see § Open): build clean
   under cyrius 6.7.18 with the pin matching; two builds reproduce
   `8da01ba3a4452660…`. Structural PASS. OVMF runtime PASS —
@@ -536,14 +557,9 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
 
 ## Open
 
-- **⚠ CI runs no boot gate — all three SKIP and report success.** Found at the
-  v0.7.3 cut. `tests/ovmf_smoke.sh` probes `/usr/share/OVMF/OVMF_CODE.fd`, but
-  Ubuntu noble's `ovmf` package ships only `OVMF_CODE_4M.fd`, so the script exits 0
-  at its SKIP branch; the CI step for it took 0 seconds at `3ef5ad3`. That is how
-  the stale `v0.7.1` banner got a green `0.7.2` release. The path is half the fix:
-  CI also has no agnos ELF, and the default 4-byte stub fails before the banner
-  prints, so fixing the probe alone turns the gate red. Until this closes, local
-  gates are the only boot evidence, and a green tag proves structure only.
+- **First real CI run.** Fixed at v0.8.2 and simulated, but not yet seen on GitHub.
+  Until a run shows the boot gates taking real time, a green tag proves
+  structure only. See § CI / Release.
 - **Audit F8 — the memory map cannot grow.** `mm_buf` is a fixed 16 KB and the
   size passed to `GetMemoryMap` matches it exactly, so it fails *closed* rather
   than truncating (audit S2, sound). But a machine whose map exceeds ~340
@@ -551,22 +567,17 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
   two-call sizing pattern, with the ordering constraint that the sizing
   `AllocatePages` must run **before** the final `GetMemoryMap` or it invalidates
   the map key. Deferred from v0.7.0; not a correctness bug.
-- **Audit F5 decision — flat struct or real tag stream?** v0.7.0 fixed the
-  *comment* (`boot_info` is documented as flat, 120 bytes, fixed offsets, no
-  terminator — which is what it actually is). The *decision* is M4's first task:
-  declare it flat permanently and drop the tag-stream concept, or grow it to 128
-  and restore an END at `0x78`. The v1.0 criterion says "every reserved tag-type
-  slot listed", which cannot be written either way until this is settled.
-- **ET_DYN / KASLR runtime coverage.** See § Verified — needs a PIE agnos build.
+- **ET_DYN / KASLR runtime coverage.** See § Verified. agnos builds a PIE kernel
+  with `CYRIUS_PIE=1 ./scripts/build.sh`, so this is next, at 0.8.3.
 
 - **boot_info feature-fill — LANDED at v0.5.0 (gnoboot side).** gnoboot now
   fills `initramfs_phys`/`size` (0x10/0x18) from `\boot\initramfs`,
   `cmdline_phys` (0x20) from `\boot\cmdline`, and `acpi_rsdp_phys` (0x38)
   from the EFI Configuration Table — all optional + benign-on-failure. The
-  **cross-repo follow-on is agnos-side**: the kernel does not yet read any
-  of these (`core/initrd.cyr` mounts a synthetic INDR image from a fixed
-  `0x6000`; no cmdline parser; `acpi_init` only does the legacy BIOS scan).
-  Wiring the kernel to read `boot_info`, and settling the **initramfs
+  **cross-repo follow-on is agnos-side**: the kernel reads `acpi_rsdp_phys`,
+  but `initramfs` and `cmdline` are diagnostic-only there (`core/initrd.cyr`
+  mounts a synthetic INDR image from a fixed `0x6000`; no cmdline parser).
+  Wiring the kernel to act on them, and settling the **initramfs
   format end-to-end** (gnoboot is deliberately format-neutral — sovereign
   INDR, not Linux cpio.gz), is the next step. Tracks the agnosticos
   read-only live-`.iso` path ([`iso-stage4-plan.md` § N1b]) — **the
@@ -576,7 +587,7 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
   fields" note; the agnos 1.40.9 `boot_info_copy` fix reads them (it was the
   root cause of the ring-3 #PF — `fb_fb_phys` read `boot_info` ≥4 GB under the
   per-process CR3). The remaining unconsumed fields are
-  initramfs/cmdline/RSDP: gnoboot **has** filled these since v0.5.0 — they are
+  initramfs/cmdline: gnoboot **has** filled these since v0.5.0 — they are
   waiting on kernel-side readers, not on gnoboot. (This bullet previously said
   gnoboot still passed 0 there; that stopped being true at v0.5.0.)
 - **Scheduler-under-UEFI stall — CLOSED.** Was "kernel reaches
