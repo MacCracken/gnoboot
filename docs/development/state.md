@@ -570,7 +570,7 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
   format end-to-end** (gnoboot is deliberately format-neutral — sovereign
   INDR, not Linux cpio.gz), is the next step. Tracks the agnosticos
   read-only live-`.iso` path ([`iso-stage4-plan.md` § N1b]) — **the
-  writable `.img` ISO cut needs none of it.** See [`roadmap.md` § v0.5.0].
+  writable `.img` ISO cut needs none of it.** See [`roadmap.md` § Not gating v1.0].
 - **Kernel now reads the inlined FB fields** (`fb_phys`/`pitch`/`width`/`height`)
   — supersedes the old "kernel stashes the pointer but doesn't dereference
   fields" note; the agnos 1.40.9 `boot_info_copy` fix reads them (it was the

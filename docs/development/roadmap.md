@@ -1,381 +1,126 @@
 # gnoboot — Roadmap
 
-> Milestone plan through v1.0 and notable post-v1 directions. State
-> lives in [`state.md`](state.md); this file is the sequencing — what
-> ships, in what order, against what dependency gates.
+> Release sequencing through v1.0 and notable post-v1 directions. State lives in
+> [`state.md`](state.md), history in [`CHANGELOG.md`](../../CHANGELOG.md). Shipped
+> work does not stay here.
 
-## Restoring `stdlib = ["fnptr"]`
+**Released: 0.8.1.** Next: **0.8.2**.
 
-Commented out in `cyrius.cyml` at v0.7.3 because of a cyrius bug, present at
-6.6.20 and still at 6.7.18. `PP_EMIT_PKGVER` emits its declaration with no
-trailing newline, so an `include` on the first prelude line gets its `#@file`
-marker mid-line, `FM_BUILD` skips it (`FM_ATBOL`), and that file reads as
-`<source>`. Since `fnptr` is gnoboot's only dep it sits there, and 6.6.20's
-exemption for files named `fnptr.cyr` stops applying. Details in `state.md`
-§ Dependencies.
+| Release | Theme | Closes |
+|---|---|---|
+| **0.8.2** | Real boot gates in CI | CI boot gap, banner drift |
+| 0.8.3 | ET_DYN / KASLR runtime coverage | the last untested load path |
+| 0.9.0 | Pre-EBS hardening | audit F8, the remaining M7 hooks |
+| 0.9.1 | Handoff contract closure | errata E2 and E3 |
+| 1.0.0 | Handoff contract freeze | the v1.0 criteria below |
 
-- [ ] Pin a cyrius with the fix, uncomment the line, run `cyrius lib sync`, and
-      confirm `lib/` stays one file and the image hash does not move.
+## 0.8.2 — Real boot gates in CI
 
-## Moving the cyrius pin to 6.6.5
+All three CI boot gates SKIP and report success; the smoke step took 0 seconds at
+`3ef5ad3`. That is how the stale `v0.7.1` banner got a green `0.7.2` release.
+`release.yml` gates on `ci.yml`, so fixing CI covers tagged releases too.
 
-Shipped at v0.7.3, which took the pin from 6.6.2 to 6.6.20. This section
-lists only what 6.6.5 itself changed.
+- [ ] `tests/ovmf_smoke.sh` probes the `_4M` firmware names Ubuntu actually ships
+      (`OVMF_CODE_4M.fd`, `OVMF_VARS_4M.fd`). `malformed_kernel.sh` and
+      `multi_ptload.sh` go through this script, so they inherit the fix.
+- [ ] CI fetches the `agnos-x86_64` release asset, checks it against that release's
+      `SHA256SUMS`, and passes it as `AGNOS_KERNEL`. The agnos version is pinned in
+      one place, so a kernel release cannot move gnoboot's CI unannounced.
+- [ ] A gate that cannot run fails under CI instead of exiting 0. SKIP stays
+      available for local runs.
+- [ ] `tests/verify_pe.sh` asserts the banner in the image matches `VERSION`.
+      Byte lists have been plain data since cyrius 6.6.16, so this now needs no
+      QEMU and catches the 0.7.2 failure in seconds.
 
-- [x] The UEFI firmware calls through `fncallN` (`src/main.cyr`, e.g.
-      `efi_print` at `:347`) ran with rsp 8 bytes off 16-byte alignment
-      on ≤ 6.6.4. 6.6.5 seeds the UEFI entry's alignment (efi_main
-      trampoline frame `0x20`, was `0x28`), parks the entry rsp in `r13`
-      and restores it before the firmware `ret`, and reserves `r13`
-      (with `r14`/`r15`) from the register allocator. Re-verify by
-      disassembly after the bump, as the *hand-verified codegen idioms*
-      note in `state.md` (`:230-233`) already requires. See the cyrius
-      CHANGELOG [6.6.5] entry
-      "rsp was 8 bytes off 16-byte alignment at every call emitted inside
-      an expression". **Disassembled at v0.7.3**: landing is `lea r13,[rsp]`,
-      `sub rsp,8`, frame `0x20`, and `mov rsp,r13; ret` on return.
-- [x] At the bump, re-run `cyrius deps` — the aarch64 syscall peer moved
-      SYS_UNLINKAT 35 → 263, so an un-re-vendored peer's sys_unlink would
-      run nanosleep. **Not applicable at v0.7.3**: gnoboot vendors no syscall
-      peer, and `lib/fnptr.cyr` was re-vendored from the 6.6.20 snapshot.
+**Done when** a CI run shows the three boot gates passing in real time, and a
+deliberately stale banner turns CI red.
 
-## v1.0 criteria
+## 0.8.3 — ET_DYN / KASLR runtime coverage
 
-v1.0 freezes the gnoboot handoff contract + the firmware-to-kernel
-guarantees. Once tagged, downstream (agnos, ark, future bootable AGNOS
-spinoffs) can depend on a stable boot ABI.
+The PIE branch (span allocation, the F6 retry, the F7 mask) has been reasoned about
+and disassembled but never run, because agnos links ET_EXEC by default. This is no
+longer blocked: agnos builds a PIE kernel with `CYRIUS_PIE=1 ./scripts/build.sh`
+and has its own `scripts/smoke/kaslr-smoke.sh`.
 
-- [ ] **Handoff struct v1 finalized** — `agnos_boot_info` layout
-      stable, no field renames, magic `0x41474E4F` locked. **Spec
-      SHIPPED at v0.7.1** —
-      [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md)
-      (roadmap M4). **Not yet frozen**: freezing requires § Errata empty or
-      consciously accepted. E1 fixed at v0.7.1; **E2 (agnos reads
-      `struct_size` as a u64, so its bound is inert) and E3 (`flags` bit 0
-      `serial` specified but never set) remain**.
-- [ ] **All inlined fields populated** — initramfs, cmdline,
-      memmap, ACPI RSDP, EFI SystemTable. v0.1.0 only fills
-      memmap + efi_st_phys.
-- [ ] **Iron-verified on 2+ hardware platforms** — NUC AMD (closed
-      beta target) + at least one other Zen/Intel UEFI box.
-      QEMU-OVMF passes are *necessary but not sufficient*.
-- [ ] **Public API frozen** — every exposed symbol documented, no
-      breaking changes accepted post-v1.0.
-- [ ] **Test coverage adequate** — structural + OVMF gates green
-      across the cyrius pin range used in CI. **Materially advanced at
-      v0.7.0**: `tests/malformed_kernel.sh` (18 malformed kernels, each
-      asserting its specific pre-EBS failure code) and
-      `tests/multi_ptload.sh` (multi-segment equivalence) mean the
-      hardening is exercised rather than merely written. Still open: the
-      **ET_DYN / KASLR path is not runtime-tested** (agnos links ET_EXEC),
-      and `src/test.cyr` still does not build.
-- [ ] **CHANGELOG complete from v0.1.0 onward** — every release
-      entry has a Breaking/Added/Changed/Fixed split where applicable.
-- [x] **Security audit pass** — ✅ **first pass landed 2026-08-29**:
-      [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md).
-      The criterion's three named sub-claims resolve as: *bounds on every
-      Read* → **not met** (findings F3, F4 — fixed in v0.7.0); *validated
-      sizes from firmware-supplied structures* → **partially met** (memmap
-      fail-closed is sound; GOP/config-table counts are bounded
-      inconsistently, F9); *no path traversal in `\boot\agnos` resolution*
-      → **met by construction** (S3 — all three ESP paths are compile-time
-      constants, nothing is concatenated). Re-run the pass after v0.7.0.
-- [ ] **v1 retrospective drafted** in `docs/development/retro/v1_cycle.md`
-      — what worked across v0.1 → v1.0, what didn't, what carries forward.
+- [ ] Boot gnoboot against a PIE agnos build and confirm the kernel starts at the
+      `kernel_base` gnoboot reported.
+- [ ] Add a gnoboot gate: two boots land at different `kernel_base` values and both
+      reach `Launching kybernet`.
+- [ ] Settle where the gate runs. The agnos release asset is ET_EXEC, so without a
+      PIE asset this stays a local and release-cut gate.
 
-## boot_info feature-fill — ✅ LANDED at v0.5.0 (gnoboot side)
+## 0.9.0 — Pre-EBS hardening
 
-> Added 2026-06-01 as P1, **shipped 2026-06-03 at v0.5.0**. gnoboot now fills
-> `initramfs_phys`/`size` (0x10/0x18) from `\boot\initramfs`, `cmdline_phys`
-> (0x20) from `\boot\cmdline`, and `acpi_rsdp_phys` (0x38) from the EFI
-> Configuration Table — all optional + benign-on-failure, no ABI change. Full
-> detail in the v0.5.0 milestone below + CHANGELOG `[0.5.0]`.
+- [ ] **Audit F8: let the memory map grow.** `mm_buf` is a fixed 16 KB, so a machine
+      past ~340 descriptors fails closed at `MM` and will not boot. Use UEFI's
+      two-call sizing. The sizing `AllocatePages` must run **before** the final
+      `GetMemoryMap`, or it invalidates the map key.
+- [ ] **Memmap sanity (M7):** at least one usable region and total RAM of at least
+      64 MB, with a distinct failure code.
+- [ ] **`boot_info` self-consistency (M7):** assert `struct_size` matches the
+      layout before EBS. Unblocked now that the struct is flat: there is no END
+      terminator to walk.
+- [ ] Regression cases for each new failure code, where QEMU can force the
+      condition.
 
-**The remaining work is the cross-repo (agnos-side) consumer**, not gnoboot:
-the agnosticos **ISO Stage-4 read-only live `.iso` path**
-([`iso-stage4-plan.md` § N1b](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iso-stage4-plan.md))
-needs the kernel to *read* `initramfs_phys`/`size` and run root from RAM — today
-`core/initrd.cyr` mounts a synthetic INDR image from a fixed `0x6000` and ignores
-the field. The **initramfs format is the open contract**: gnoboot is deliberately
-format-neutral (`\boot\initramfs`, raw bytes), and the kernel's sovereign INDR
-format — not Linux `cpio.gz` — is the AGNOS-native direction. **The writable
-`.img` ISO form needs none of this** (iso-stage4-plan § N1a). `cmdline_phys` +
-`acpi_rsdp_phys` also await kernel-side readers (cmdline parser; an ACPI
-`boot_info` fallback ahead of the legacy BIOS probe).
+These hooks are always on. M7 specced an opt-out through `/boot/gnoboot.cfg`, but
+gnoboot has no config parser, and these checks do not justify adding one.
 
-## Milestones — v0.x → v1.0
+## 0.9.1 — Handoff contract closure
 
-> **⚠ Version labels below are stale.** The `v0.3.0`/`v0.4.0`/`v0.5.0` slots
-> M2–M4 were assigned to already shipped the scanout-residue arc instead (see
-> *Immediate priority* above). These feature-fills re-slot starting at the next
-> feature release; the M-numbering is kept for continuity, not the versions.
+The spec requires each erratum closed or consciously accepted before the freeze.
 
-### M0 — v0.1.0 — ✅ shipped 2026-05-13
+- [ ] **E3 (gnoboot):** `flags` bit 0 `serial` is specified but no release has ever
+      set it. Give it a meaning or retire it.
+- [ ] **E2 (agnos):** `kernel/arch/x86_64/mbi.cyr` still reads `struct_size` with
+      `load64` at agnos 1.57.14, so its bound is inert. Needs `load32` on the agnos
+      side, or an explicit acceptance recorded in the spec.
+- [ ] Refresh the spec's § 8 consumer status, which still describes agnos 1.56.52.
 
-MVP handoff verified on QEMU OVMF. gnoboot loads
-`\boot\agnos` from ESP, builds an 80-byte sovereign boot-info struct
-(magic / version / struct_size / memmap_phys-count-entsize /
-efi_st_phys + END tag), calls ExitBootServices, jumps to kernel
-entry at `0x1000A8` with `RDI = &boot_info`. Pairs with **agnos
-1.30.0** (sovereign-struct entry contract: `mbi_capture_rbx →
-boot_info_capture_rdi`).
+## 1.0.0 — Handoff contract freeze
 
-### M1 — v0.2.0 — iron-verified MVP
+From v1.0 onward, no breaking change to the `boot_info` layout, magic or register
+convention without a major bump. Downstream (agnos, ark, future bootable AGNOS
+spinoffs) can then depend on a stable boot ABI.
 
-**Gate**: iron Attempt 5 on the NUC AMD passes. gnoboot v0.1.0 +
-agnos 1.30.x USB re-provision; kernel boots through to its
-`Activating scheduler` checkpoint on real hardware.
+- [ ] **Handoff struct frozen:** layout stable, no field renames, magic `0x41474E4F`
+      locked, spec § Errata empty or consciously accepted.
+- [ ] **Public surface frozen:** gnoboot is a binary, so this means the handoff
+      contract and the ESP paths it reads, all documented.
+- [ ] **Test coverage adequate:** 0.8.2 and 0.8.3 shipped, and structural and OVMF
+      gates green in CI.
+- [ ] **Iron-verified on 2+ platforms:** NUC AMD plus at least one other Zen or
+      Intel UEFI box. QEMU-OVMF passes are *necessary but not sufficient*. Do not
+      save this for the end: no release since 0.7.3 has been burned, and that is
+      where the entry sequence changed, so the next agnos burn should check it.
+- [ ] **Security audit re-run:** the 2026-08-29 pass predates all of the hardening
+      it scoped.
+- [ ] **CHANGELOG complete:** all 17 tags have a section as of 0.8.1. Still to check
+      that early entries have the Breaking/Added/Changed/Fixed split where applicable.
+- [ ] **v1 retrospective drafted** in `docs/development/retro/v1_cycle.md` before
+      the tag, per the agnosticos retro pattern.
 
-Closes the only outstanding v0.1.0 validation. No new gnoboot
-features; this is a confidence cut. Whatever the iron run surfaces
-(if anything) drives v0.2.x patches.
+## Not gating v1.0
 
-### v0.5.0 — boot_info feature-fill (initramfs + cmdline + ACPI RSDP) — ✅ shipped 2026-06-03
-
-> Consolidated the slipped M2/M3 fills into one release. All three use the same
-> mechanism — read an ESP file or walk a firmware table, then populate a reserved
-> `boot_info` field that previously passed **0**. The struct was already sized for
-> them (v2, `0x78`); **no ABI bump, no struct-version change**. All three are
-> OPTIONAL + benign-on-failure, so a normal boot is byte-for-byte unaffected.
-> Also advanced the cyrius pin `6.0.14` → `6.0.47`.
-
-Shipped:
-
-1. **`initramfs_phys` / `initramfs_size` (0x10/0x18) — the ISO live-`.iso` gate.**
-   Loads `\boot\initramfs` from the ESP into an `EfiLoaderData` region
-   (`GetInfo` → `AllocateAnyPages` → `Read`) and sets the pair. **The path is
-   format-NEUTRAL** (`\boot\initramfs`, no extension): gnoboot loads raw bytes and
-   reports phys+size; the kernel owns the format. The earlier `\boot\initramfs.cpio.gz`
-   plan was dropped — `cpio.gz` is a Linux-ism, and the kernel reads a sovereign
-   INDR blob, not gzipped cpio (per the kernel-grows-per-native-workload principle).
-   Keeping the format out of the gnoboot-visible name lets it evolve without
-   re-cutting the loader.
-2. **`cmdline_phys` (0x20).** Loads `\boot\cmdline` (NUL-terminated UTF-8) into an
-   `EfiLoaderData` page. Optional; forward-compat (no kernel consumer yet).
-3. **`acpi_rsdp_phys` (0x38).** Walks `SystemTable->ConfigurationTable`, prefers
-   the ACPI 2.0 GUID and falls back to 1.0, and stores the matching `VendorTable`
-   (the RSDP). Unblocks ACPI under UEFI, where the kernel's legacy BIOS probe
-   finds nothing.
-
-**Verified**: OVMF smoke (fills run, boot reaches handoff unchanged; OVMF RSDP
-captured, absent files benign-`0`), EFI `ud2` scan clean, and a multi-lens
-adversarial review (GUIDs/offsets/ABI re-derived + confirmed; three robustness
-caps folded in). **Cross-repo follow-on (agnos-side)**: the kernel doesn't read
-these yet (`core/initrd.cyr` mounts a synthetic INDR image from `0x6000`; no
-cmdline parser; legacy-only ACPI). Wiring the kernel + settling the initramfs
-format end-to-end is the next step; iron re-verify of the filled fields rides the
-next agnos burn.
-
-### M2 — cmdline + initramfs — ✅ ABSORBED into v0.5.0 above
-
-> Historical M-number. The cmdline + initramfs fills are now the v0.5.0 scope
-> (items 1–2). Kept for milestone-numbering continuity.
-
-### M3 — ACPI RSDP + EFI Configuration Table walk — ✅ ABSORBED into v0.5.0 above
-
-> Historical M-number. Now v0.5.0 item 3. Kept for continuity.
-
-### M4 — handoff-protocol v1 spec doc — ✅ SHIPPED at v0.7.1
-
-`docs/standards/handoff-protocol.md` written as the authoritative
-spec. Every field documented; every reserved tag-type slot listed;
-versioning rules + forward-compat rules pinned. **Hardens the contract
-for v1.0.** Re-slots to **~v0.6.0** now that v0.5.0 is the boot_info
-feature-fill; should be drafted once the v0.5.0 fills settle the field
-layout (so the spec documents the as-shipped struct, not a moving target).
-
-> ✅ **Shipped 2026-08-29 at v0.7.1**:
-> [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md).
-> **F5 is settled — `boot_info` is flat and fixed-offset; there is no tag stream
-> and there will not be one**, with append-only growth and `struct_size` as the
-> sole authority. Not a ratification of the accident: the inlined layout exists
-> because the kernel canary reads `fb_phys` from raw asm at entry instruction
-> one; a tag walker over firmware-influenced data is an unbounded loop of exactly
-> the class the audit was written to remove; and fixed offsets are checkable by
-> inspection where a tag stream is not.
->
-> **Writing it found a live bug** (spec erratum **E1**): `fb_mode_chosen` at
-> `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot
-> since v0.6.1 — the AMD-Zen scanout diagnostic had never once reached the
-> kernel. Fixed in the same cut by relocating it to `0x78` and growing the struct
-> to 128 bytes. **The overlap was invisible in a comment block ordered by when
-> fields were added, and obvious in a table ordered by address.**
->
-> **Still open before the v1.0 freeze**: erratum **E2** (agnos reads
-> `struct_size` as a `u64`, so its bound is inert — agnos-side) and **E3**
-> (`flags` bit 0 `serial` is specified but no producer sets it — give it a
-> meaning or retire it).
-
-<details><summary>Original M4 note (superseded)</summary>
-
-> **The 2026-08-29 audit found the blocker (F5).** The spec cannot be written
-> until one decision is made: **is `boot_info` a flat 120-byte struct, or a
-> struct followed by a tag stream?** The layout comment says the latter and
-> documents an END terminator at `0x70` — but v0.6.0's `kernel_base` store
-> overwrote it, so no terminator exists and `struct_size` still reports 120. No
-> shipped consumer walks tags (agnos reads fixed offsets), so nothing is broken
-> today; but *"every reserved tag-type slot listed"* is a v1.0 criterion, and the
-> struct currently contradicts its own documentation. Either declare it flat and
-> drop the tag-stream concept, or grow it to 128 bytes and restore an END at
-> `0x78`. **That call is M4's first task, not its last.**
-
-</details>
-
-### M5 — multi-PT_LOAD support — ✅ SHIPPED at v0.7.0 (merged with M7)
-
-> **Re-scoped by the 2026-08-29 audit** ([`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md),
-> finding **F2**). The version label `v0.6.0` is stale — that slot went to the
-> KASLR / ET_DYN arc. M5 and M7 turned out to be **the same twenty lines of
-> code**, so they ship together as v0.7.0 below.
-
-Today the kernel loader assumes a single PT_LOAD: `e_phnum` is never read, only
-`phdr[0]` is honored, and a first program header that is not `PT_LOAD` is a hard
-`PT` failure. The audit reclassifies this from *forward-compat feature* to
-**correctness bug** — a kernel with 2+ `PT_LOAD` segments (any hardened RX-text /
-RW-data split) is **silently under-loaded**, not cleanly rejected. `e_phentsize`
-is likewise assumed to be 56 with no check.
-
-v0.7.0 walks all `e_phnum` program headers, AllocatePages per PT_LOAD, copies
-file segments into place, zero-fills each BSS gap. Forward-compat with kernels
-that may grow .data/.bss into separate segments, and with non-agnos kernels
-(Linux's `bzImage` shape is multi-segment under multiboot2; sovereign-struct can
-deliver that too if a Linux variant ever wants to consume our handoff).
-
-> **Correction**: this section previously listed *"zero-fills BSS"* as future
-> work. gnoboot has zeroed `[p_filesz, p_memsz)` since Step 7
-> (`src/main.cyr:503-511`) precisely because `AllocatePages` does not guarantee
-> zeroed memory (UEFI 2.x §7.2) — audit S6, verified sound. What v0.7.0 adds is
-> doing it **per segment** rather than for the single assumed one.
-
-### v0.7.0 — ELF-load hardening (M5 + M7 merged) — ✅ shipped 2026-08-29
-
-> **Scoped by the 2026-08-29 audit, shipped the same day.** The audit did not
-> produce a work list parallel to this roadmap — it produced the same list,
-> better ordered. Every item below is an audit finding; severities are per
-> `SECURITY.md`'s rubric. Full detail, including the verified-sound paths that
-> needed no change, is in
-> [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md).
->
-> **All nine items below landed.** The release is gated by two new tests —
-> `tests/malformed_kernel.sh` (18 corrupted kernels booted under OVMF, each
-> asserting its specific failure code) and `tests/multi_ptload.sh` (the real
-> kernel's `PT_LOAD` split in two, proven to boot equivalently). **Not an ABI
-> change**: only an additive `flags` bit 2.
->
-> **Carried forward**: audit **F8** (the 16 KB memmap buffer cannot grow — safe
-> but brittle; the sizing `AllocatePages` must precede the final
-> `GetMemoryMap`), and the **F5 decision** (flat struct vs. real tag stream),
-> which is M4's first task. Also owed: a **runtime run of the ET_DYN / KASLR
-> path**, which agnos's current ET_EXEC link leaves unexercised.
-
-The unifying observation: **`load_esp_blob` — the *optional* initramfs/cmdline
-path added at v0.5.0 — is already hardened the way the *mandatory* kernel path
-is not.** Most of this release is "bring the kernel load up to what the optional
-load already does."
-
-1. **F1 (HIGH) — validate the ELF header before using it.** The pre-load check is
-   one byte (`0x7F`). Add the remaining magic bytes, `EI_CLASS`, `EI_DATA`,
-   `e_machine == 0x3E`, and `e_phentsize == 56` — **before** `e_phoff` is allowed
-   to drive `SetPosition`. This is M7's *"kernel ELF magic + machine match"* hook,
-   moved to where it gates rather than where it merely backstops.
-2. **F2 (MEDIUM) — walk all `e_phnum` program headers.** This is M5, above.
-3. **F3 (HIGH) — check for short reads.** UEFI 2.10 §13.5.1 lets `Read` transfer
-   fewer bytes and still return `EFI_SUCCESS`. `load_esp_blob` already guards
-   this; the kernel segment read and both header reads do not.
-4. **F4 (HIGH) — bound `p_filesz` / `p_memsz` / `p_offset`.** Reject
-   `p_filesz > p_memsz` (copy overrun) and cap `p_memsz` before the page-count
-   arithmetic (wrap → zero-page allocation). `load_esp_blob`'s 1 GiB cap is the
-   precedent, and its comment already names the identical overflow.
-5. **F6 (MEDIUM) — make KASLR fail loudly.** Retry `rdrand` on CF=0 (Intel
-   guidance: 10 attempts) and set a `boot_info` flags bit on exhaustion, so the
-   kernel reports *"KASLR: entropy unavailable"* instead of a fixed 32 MB base
-   that is indistinguishable from a randomized one.
-6. **F7 (LOW) — mask instead of negate** in the KASLR slide, so `i64::MIN` cannot
-   escape the window.
-7. **F9 (LOW) — bound the remaining firmware-supplied counts** for consistency
-   with the ACPI walk's existing 256 cap: `max_mode` in the `QueryMode` loop,
-   `ctab == 0`, and `dsz == 0`.
-8. **F5 (MEDIUM) — correct the `boot_info` layout comment**, which still documents
-   an END terminator at `0x70` that the v0.6.0 `kernel_base` store overwrote. The
-   *decision* about what the struct actually is belongs to M4, below; v0.7.0 only
-   stops the comment from lying.
-9. **Reconcile `SECURITY.md`** in the same cut — its threat model currently claims
-   bounds-checking that items 1–4 are what actually implement.
-
-**Deferred as planned**: the **memmap sanity** hook and the two-call
-`GetMemoryMap` sizing pattern (audit F8 — safe today, just brittle at >16 KB
-maps; the sizing `AllocatePages` must happen *before* the final `GetMemoryMap`
-or it invalidates the map key), and the **handoff struct self-consistency**
-hook, which cannot be written until M4 settles F5.
-
-### M6 — verbose-serial diagnostic mode — **re-slot and re-scope before building**
-
-> **⚠ Flagged by the 2026-08-29 audit.** The version label `v0.7.0` is now taken
-> by the hardening cut above. More importantly: this milestone is specced as
-> *serial*-print diagnostics, and **archaemenid has no serial cable** — which is
-> exactly why the 0.4.0 kernel-side audit results were made to sink to CMOS. A
-> serial-only diagnostic mode does not help the one box that matters. Re-scope
-> to the transport that reached iron (CMOS, or the framebuffer) before building
-> it, or accept that it is a QEMU-only convenience.
-
-
-`/boot/gnoboot.cfg` (UTF-8 INI-like) toggles a verbose mode that
-serial-prints every firmware call result, every parsed ELF/program-
-header field, every AllocatePages outcome, the boot-info struct
-contents (hex-dump) before EBS. Off by default (silent boot when
-disabled); on by default in `*.dev` builds. Costs ~1 KB binary
-size, ~2 sec boot-time when enabled.
-
-### M7 — boot-info validation hooks — ✅ two of three SHIPPED at v0.7.0
-
-> **Re-scoped by the 2026-08-29 audit.** Two of the three hooks below are audit
-> findings F1 and F4 and ship in v0.7.0. The third cannot be written yet — see
-> the note under *Handoff struct self-consistency*. Kept for milestone-numbering
-> continuity.
-
-
-Three optional security/sanity hooks before EBS:
-
-- **Memmap sanity**: assert at least 1 usable region exists, total
-  RAM ≥ minimum (defaults: 64 MB).
-- **Kernel ELF magic + machine match**: re-verify after AllocatePages
-  + Read (currently verified post-Read but worth a defensive
-  re-check before jumping).
-- **Handoff struct self-consistency**: walk the END terminator;
-  assert `struct_size` matches the inlined-fields layout's computed
-  size. **⛔ Cannot be written as specced** — audit **F5** found there
-  *is* no END terminator: the v0.6.0 `kernel_base` store at `0x70`
-  overwrote it, so a tag walker reads `type = low32(kernel_base)` and
-  `size = 0`. Blocked on M4 deciding whether boot_info is a flat
-  120-byte struct or a struct plus a real tag stream.
-
-Each hook can be opt-out via `/boot/gnoboot.cfg`. Aimed at production
-deployment where a stuck-at-EBS surface is better than booting a
-kernel into a confused environment.
-
-### M8 — v0.9.0 — aarch64 UEFI port
-
-Pi 4 / aarch64 UEFI is the secondary AGNOS target. The cyrius PE
-backend currently emits x86_64 only (subsystem 0x000A, machine
-0x8664). The AArch64 UEFI Application port needs:
-
-- cyrius support for `_TARGET_EFI_APPLICATION` on aarch64 (PE32+
-  with `machine = 0xAA64`)
-- gnoboot's MS x64 firmware-call trampolines replaced with AAPCS64
-  variants
-- Pi 4 device-tree handling (DTB pointer in boot-info? or kernel
-  parses ACPI?)
-
-Probably its own arc once the iron campaign concludes the x86_64
-side.
-
-### v1.0.0 — handoff contract freeze
-
-When M1–M8 are green and the v1.0 criteria above are met. From v1.0
-onward, no breaking changes to `boot_info` layout, magic, or register
-convention without a major bump. Cuts the **v1 cycle retrospective**
-in `docs/development/retro/v1_cycle.md` per the agnosticos retro
-pattern.
+- **Restoring `stdlib = ["fnptr"]`.** Commented out in `cyrius.cyml` since v0.7.3 and
+  waiting on a cyrius fix; still failing at 6.7.18. Details in `state.md`
+  § Dependencies. Once a fixed cyrius is pinned, uncomment it, run `cyrius lib sync`,
+  and confirm `lib/` stays one file and the image hash does not move.
+- **agnos-side readers.** gnoboot fills these; acting on them is kernel work. The
+  `initramfs_phys`/`size` and `cmdline_phys` fields are diagnostic-only there, and
+  the kernel side tracks the agnosticos read-only live `.iso` path
+  ([`iso-stage4-plan.md` § N1b](https://github.com/MacCracken/agnosticos/blob/main/docs/development/iso-stage4-plan.md)).
+  The initramfs format is the open contract: gnoboot stays format-neutral, and the
+  kernel's sovereign INDR format is the AGNOS-native direction. `flags` bit 2
+  (`kaslr_no_entropy`) has no reader, and `fb_mode_chosen` at `0x78` needs one
+  before a burn can answer the AMD-Zen scanout question.
+- **Verbose diagnostic mode (M6).** No v1.0 criterion needs it, and it must be
+  re-scoped before building: it is specced as serial output, archaemenid has no
+  serial cable, and the `/boot/gnoboot.cfg` that toggles it does not exist.
+- **aarch64 UEFI port (M8).** Blocked: cyrius has no aarch64 EFI emit. No v1.0
+  criterion needs it either, and because `boot_info` growth is append-only, anything
+  the port adds can land after the freeze. It also needs AAPCS64 firmware calls and a
+  decision on Pi 4 device-tree handling.
 
 ## Post-v1.0 directions
 
@@ -465,46 +210,3 @@ with AGNOS as the canonical consumer.
 - **Self-modification at runtime** — gnoboot's binary is read-only after
   firmware loads it. Configuration via `/boot/gnoboot.cfg` (text file on
   ESP), not via patching gnoboot itself.
-
----
-
-## Moving the cyrius pin to 6.6.6
-
-Shipped at v0.7.3, which went past this target to 6.6.20. This assessment was right
-for 6.6.6; the one thing that did have to change arrived later, at 6.6.20 (see
-*Restoring `stdlib = ["fnptr"]`* above). Kept as the record of what was checked.
-
-**What was checked** (the two `.cyr` in `src/`: `main.cyr` and `test.cyr`):
-
-- **Windows write corruption: structurally impossible here.** gnoboot has **zero**
-  `O_APPEND` / `O_TRUNC` anywhere — not even in `lib/`, because `[deps] stdlib = ["fnptr"]`
-  vendors one module and the file-I/O stdlib is not part of the build. gnoboot reaches the
-  ESP through UEFI `SimpleFileSystem` protocol calls, not POSIX opens, so none of the PE
-  open-flag work (append, truncate, access mode, `file_exists`/`file_read_all` dropping
-  write access) reaches this repo either way.
-- **The 6.6.6 `--target=js` and `cyrius pulsar` refusals do not affect the build.** gnoboot
-  selects its output with `CYRIUS_TARGET_EFI=1` before `cyrius build`, which is untouched.
-- **No shape the new refusals catch.** Zero `struct` declarations, no struct/vector copies,
-  no by-value struct parameters, no `async fn`, no `operator` fn, no SIMD-returning fn, no
-  fn mixing pair and scalar returns, no `var` inside a top-level block (zero top-level `{` /
-  `if (` / `while (` at column 0), no raw `SYS_STATFS`, no `lib/regression.cyr` consumer,
-  no `vec_*` of gnoboot's own, no symlink in `lib/`.
-- ⚠ **Not to be confused:** `docs/architecture/003-ms-x64-firmware-call-abi.md` is about the
-  **MS x64 calling convention UEFI firmware requires**, not about a Windows target.
-  `BOOTX64.EFI` *is* a PE32+ image (`tests/verify_pe.sh` checks that), but that is the UEFI
-  container, not `CYRIUS_TARGET_WIN`: gnoboot never links the Windows file-API layer where
-  6.6.6's `O_APPEND` / `O_TRUNC` / access-mode fixes live, and carries no
-  `CYRIUS_TARGET_WIN` branch. So the Win64 half of 6.6.6 is not gnoboot's concern — but the
-  MS x64 call path is worth a re-run of the OVMF smoke after the bump anyway, because 6.6.5
-  corrected three wrong **ENTRY stack bases**, one of them UEFI's.
-
-**What it gains: the UEFI entry-base fix is the headline for this repo.** 6.6.5 found the
-PE, UEFI and x86 Mach-O entry bases each mis-aligned; a bootloader that calls firmware
-functions under the MS x64 ABI is precisely the consumer that cares. Plus 6.6.3's
-`#inline`-disarms-`#derive` fix, 6.6.4's ≥64 KB string-literal fix, and 6.6.6's nine new
-refusals.
-
-**Verify after bumping:** `cyrius deps` → `CYRIUS_TARGET_EFI=1 cyrius build` →
-`tests/ovmf_smoke.sh` end-to-end (banner → `HandleProtocol` → ELF load → `GetMemoryMap` →
-`ExitBootServices` → kernel entry with `RDI = &boot_info`). A structural gate passing is not
-this — run OVMF. Given the entry-base change, do not accept "it compiled" as the result.
