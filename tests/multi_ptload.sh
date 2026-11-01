@@ -24,9 +24,9 @@
 # asserted for each — so an environmental failure reports as "baseline
 # failed" instead of being misattributed to the split.
 #
-# NOT covered here: the ET_DYN / KASLR path. agnos currently links ET_EXEC,
-# and gnoboot's PIE branch (including the multi-segment span allocation)
-# needs a real PIE kernel to exercise. See docs/development/state.md § Open.
+# The default kernel is ET_EXEC. Pass a PIE kernel as AGNOS_KERNEL to run the
+# same split through gnoboot's PIE branch, which is how its multi-segment span
+# allocation gets exercised. tests/build_pie_agnos.sh builds one.
 #
 # Usage:
 #   tests/multi_ptload.sh

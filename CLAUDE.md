@@ -98,6 +98,7 @@ At every major version bump (v1.0.0, v2.0.0, …) write a retrospective in `docs
 ```
 [ ] tests/verify_pe.sh PASS
 [ ] tests/ovmf_smoke.sh PASS (expect = current version banner)
+[ ] tests/kaslr.sh PASS (AGNOS_PIE_KERNEL from tests/build_pie_agnos.sh; not run in CI)
 [ ] VERSION updated
 [ ] CHANGELOG.md updated, includes the new VERSION as a top-level section
 [ ] cyrius.cyml toolchain pin matches the intended cyrius release

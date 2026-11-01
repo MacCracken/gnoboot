@@ -6,6 +6,49 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-11-01
+
+ET_DYN / KASLR runtime coverage. No code path in the bootloader changed and there is no ABI
+change; against the 0.8.2 image the binary differs by **one byte**, the banner's patch digit at
+`0x401A`.
+
+No gnoboot gate had ever run the PIE branch, and `state.md` recorded no run of it since the v0.7.0
+rewrite. That branch now has real results.
+
+### Added
+
+- **`tests/kaslr.sh`, the KASLR gate.** Boots a real PIE kernel and asserts each boot lands in
+  `[32 MB, 254 MB)`, 2 MB-aligned, reaches `Launching kybernet`, and that the base varies between
+  boots. Fails on all four mutants tried: stuck slide, no slide, misaligned slide, unslid entry.
+  Not run in CI, because the agnos release asset is ET_EXEC; it is on the release checklist.
+- **`tests/build_pie_agnos.sh`.** Builds a PIE agnos from copies under `build/` with agnos's pinned
+  toolchain, so it cannot overwrite the ET_EXEC `build/agnos` the other gates boot or change the
+  default toolchain. Treats an ET_DYN file as success, because agnos's `build.sh` exits 1 after a
+  good PIE link: its post-link check expects the ET_EXEC entry point.
+- **`SERIAL_LOG` hook in `tests/ovmf_smoke.sh`**, which keeps the whole capture for a caller.
+
+### Verified
+
+- **The image is where gnoboot says.** On 10 of 10 boots the QEMU monitor showed the ELF header at
+  the reported base and not at `0x100000`, with RIP inside the slid image on every sample. This is
+  independent of the kernel's echo of `kernel_base`. The gate does not repeat it.
+- **The re-roll and the fallback both work.** At 128 MB every base landed inside usable RAM, which
+  requires re-rolling. A mutant forced to `0x100000` still reached `Launching kybernet`, so the
+  source's "still correct — the kernel is RIP-relative" holds.
+- **The multi-segment span allocation works.** `multi_ptload.sh` passes on the PIE kernel.
+- Structural PASS, OVMF runtime PASS on real agnos 1.57.14, `malformed_kernel.sh` **18/18**,
+  `multi_ptload.sh` PASS, `kaslr.sh` PASS, `cyrius test`, `bench` and `fuzz` green. **Not run on
+  iron.**
+
+### Known issues
+
+- **gnoboot executes `rdrand` without checking CPUID.** Loading a PIE kernel on a CPU without RDRAND
+  faults with `#UD` at gnoboot's own instruction, so the v0.7.0 "KASLR fails loudly" work covers
+  RDRAND failing but not RDRAND being absent. ET_EXEC kernels never reach it, and agnos needs RDRAND
+  itself, so nothing shipping hits this today. Slotted for 0.9.0.
+- **Still unexercised:** RDRAND exhausting its retries, which sets `flags` bit 2. QEMU's RDRAND does
+  not fail, so no gate can reach it.
+
 ## [0.8.2] — 2026-11-01
 
 Real boot gates in CI. No code path in the bootloader changed and there is no ABI change;

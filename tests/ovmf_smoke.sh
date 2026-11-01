@@ -105,6 +105,10 @@ OUTPUT=$(timeout "${QEMU_TIMEOUT:-20}" qemu-system-x86_64 \
     -drive "file=disk.img,format=raw" \
     -serial stdio -display none -no-reboot 2>/dev/null || true)
 
+# Optional: keep the whole capture for a caller that reads more than EXPECT
+# (tests/kaslr.sh parses kernel_base). Must be an absolute path: we are in $D.
+[ -z "${SERIAL_LOG:-}" ] || printf '%s\n' "$OUTPUT" > "$SERIAL_LOG"
+
 if echo "$OUTPUT" | grep -q "$EXPECT"; then
     echo "PASS: \"$EXPECT\" observed on ConOut"
     exit 0

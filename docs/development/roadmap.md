@@ -4,51 +4,25 @@
 > [`state.md`](state.md), history in [`CHANGELOG.md`](../../CHANGELOG.md). Shipped
 > work does not stay here.
 
-**Released: 0.8.1.** Next: **0.8.2**, implemented and awaiting its first real CI run.
+**Released: 0.8.2.** Next: **0.8.3**, implemented and awaiting its tag.
 
 | Release | Theme | Closes |
 |---|---|---|
-| **0.8.2** | Real boot gates in CI | CI boot gap, banner drift |
-| 0.8.3 | ET_DYN / KASLR runtime coverage | the last untested load path |
-| 0.9.0 | Pre-EBS hardening | audit F8, the remaining M7 hooks |
+| **0.8.3** | ET_DYN / KASLR runtime coverage | the last untested load path |
+| 0.9.0 | Pre-EBS hardening | audit F8, the remaining M7 hooks, RDRAND CPUID check |
 | 0.9.1 | Handoff contract closure | errata E2 and E3 |
 | 1.0.0 | Handoff contract freeze | the v1.0 criteria below |
 
-## 0.8.2 — Real boot gates in CI
-
-All three CI boot gates SKIP and report success; the smoke step took 0 seconds at
-`3ef5ad3`. That is how the stale `v0.7.1` banner got a green `0.7.2` release.
-`release.yml` gates on `ci.yml`, so fixing CI covers tagged releases too.
-
-- [x] `tests/ovmf_smoke.sh` probes the `_4M` firmware names Ubuntu actually ships
-      (`OVMF_CODE_4M.fd`, `OVMF_VARS_4M.fd`). `malformed_kernel.sh` and
-      `multi_ptload.sh` go through this script, so they inherit the fix.
-- [x] CI fetches the `agnos-x86_64` release asset, checks it against that release's
-      `SHA256SUMS`, and passes it as `AGNOS_KERNEL`. The agnos version is pinned in
-      `tests/AGNOS_VERSION`, so a kernel release cannot move gnoboot's CI unannounced.
-- [x] A gate that cannot run exits 77, which fails a CI step, instead of exiting 0.
-      It still prints SKIP for local runs.
-- [x] `tests/verify_pe.sh` asserts the banner in the image matches `VERSION`.
-      Byte lists have been plain data since cyrius 6.6.16, so this now needs no
-      QEMU and catches the 0.7.2 failure in seconds.
-
-**Done when** a CI run shows the three boot gates passing in real time, and a
-deliberately stale banner turns CI red. The local half is proven; the CI run needs
-a push.
-
 ## 0.8.3 — ET_DYN / KASLR runtime coverage
 
-The PIE branch (span allocation, the F6 retry, the F7 mask) has been reasoned about
-and disassembled but never run, because agnos links ET_EXEC by default. This is no
-longer blocked: agnos builds a PIE kernel with `CYRIUS_PIE=1 ./scripts/build.sh`
-and has its own `scripts/smoke/kaslr-smoke.sh`.
+No gnoboot gate ran the PIE branch before this, because agnos links ET_EXEC by
+default. Results are in `state.md` § Verified.
 
-- [ ] Boot gnoboot against a PIE agnos build and confirm the kernel starts at the
-      `kernel_base` gnoboot reported.
-- [ ] Add a gnoboot gate: two boots land at different `kernel_base` values and both
-      reach `Launching kybernet`.
-- [ ] Settle where the gate runs. The agnos release asset is ET_EXEC, so without a
-      PIE asset this stays a local and release-cut gate.
+- [x] Boot gnoboot against a PIE agnos build and confirm the kernel starts at the
+      `kernel_base` gnoboot reported. Confirmed through the QEMU monitor.
+- [x] Add a gnoboot gate: `tests/kaslr.sh`, kernel from `tests/build_pie_agnos.sh`.
+- [x] Settle where the gate runs: a release-cut gate, on the release checklist. CI
+      coverage would need agnos to publish a PIE asset.
 
 ## 0.9.0 — Pre-EBS hardening
 
@@ -61,6 +35,10 @@ and has its own `scripts/smoke/kaslr-smoke.sh`.
 - [ ] **`boot_info` self-consistency (M7):** assert `struct_size` matches the
       layout before EBS. Unblocked now that the struct is flat: there is no END
       terminator to walk.
+- [ ] **Check CPUID before `rdrand`.** On a CPU without it, a PIE load faults with
+      `#UD` instead of taking the `flags` bit 2 fallback. Found at v0.8.3; `-cpu
+      max,rdrand=off` reproduces it. `rdrand_u64` is a hand-verified idiom, so
+      re-disassemble it after the change.
 - [ ] Regression cases for each new failure code, where QEMU can force the
       condition.
 
