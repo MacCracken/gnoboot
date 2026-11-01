@@ -4,43 +4,23 @@
 > [`state.md`](state.md), history in [`CHANGELOG.md`](../../CHANGELOG.md). Shipped
 > work does not stay here.
 
-**Released: 0.8.2.** Next: **0.8.3**, implemented and awaiting its tag.
+**Released: 0.8.3.** Next: **0.9.0**, implemented and awaiting its tag.
 
 | Release | Theme | Closes |
 |---|---|---|
-| **0.8.3** | ET_DYN / KASLR runtime coverage | the last untested load path |
-| 0.9.0 | Pre-EBS hardening | audit F8, the remaining M7 hooks, RDRAND CPUID check |
+| **0.9.0** | Pre-EBS hardening | audit F8, the remaining M7 hooks, RDRAND CPUID check |
 | 0.9.1 | Handoff contract closure | errata E2 and E3 |
 | 1.0.0 | Handoff contract freeze | the v1.0 criteria below |
 
-## 0.8.3 — ET_DYN / KASLR runtime coverage
-
-No gnoboot gate ran the PIE branch before this, because agnos links ET_EXEC by
-default. Results are in `state.md` § Verified.
-
-- [x] Boot gnoboot against a PIE agnos build and confirm the kernel starts at the
-      `kernel_base` gnoboot reported. Confirmed through the QEMU monitor.
-- [x] Add a gnoboot gate: `tests/kaslr.sh`, kernel from `tests/build_pie_agnos.sh`.
-- [x] Settle where the gate runs: a release-cut gate, on the release checklist. CI
-      coverage would need agnos to publish a PIE asset.
-
 ## 0.9.0 — Pre-EBS hardening
 
-- [ ] **Audit F8: let the memory map grow.** `mm_buf` is a fixed 16 KB, so a machine
-      past ~340 descriptors fails closed at `MM` and will not boot. Use UEFI's
-      two-call sizing. The sizing `AllocatePages` must run **before** the final
-      `GetMemoryMap`, or it invalidates the map key.
-- [ ] **Memmap sanity (M7):** at least one usable region and total RAM of at least
-      64 MB, with a distinct failure code.
-- [ ] **`boot_info` self-consistency (M7):** assert `struct_size` matches the
-      layout before EBS. Unblocked now that the struct is flat: there is no END
-      terminator to walk.
-- [ ] **Check CPUID before `rdrand`.** On a CPU without it, a PIE load faults with
-      `#UD` instead of taking the `flags` bit 2 fallback. Found at v0.8.3; `-cpu
-      max,rdrand=off` reproduces it. `rdrand_u64` is a hand-verified idiom, so
-      re-disassemble it after the change.
-- [ ] Regression cases for each new failure code, where QEMU can force the
-      condition.
+- [x] **Audit F8: let the memory map grow.** Two-call sizing on every boot, with
+      the map in its own `EfiLoaderData` allocation.
+- [x] **Memmap sanity (M7):** failure code `RAM`.
+- [x] **`boot_info` self-consistency (M7):** failure code `BI`.
+- [x] **Check CPUID before `rdrand`.**
+- [x] Regression cases: `tests/pre_ebs.sh` in CI, a no-RDRAND case in
+      `tests/kaslr.sh`.
 
 These hooks are always on. M7 specced an opt-out through `/boot/gnoboot.cfg`, but
 gnoboot has no config parser, and these checks do not justify adding one.
@@ -70,8 +50,9 @@ spinoffs) can then depend on a stable boot ABI.
       gates green in CI.
 - [ ] **Iron-verified on 2+ platforms:** NUC AMD plus at least one other Zen or
       Intel UEFI box. QEMU-OVMF passes are *necessary but not sufficient*. Do not
-      save this for the end: no release since 0.7.3 has been burned, and that is
-      where the entry sequence changed, so the next agnos burn should check it.
+      save this for the end: no release since 0.7.3 has been burned, and two things
+      the next burn must check have changed since: the entry sequence at 0.7.3 and
+      where the memory map lives at 0.9.0.
 - [ ] **Security audit re-run:** the 2026-08-29 pass predates all of the hardening
       it scoped.
 - [ ] **CHANGELOG complete:** all 17 tags have a section as of 0.8.1. Still to check

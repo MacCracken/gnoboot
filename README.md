@@ -24,7 +24,7 @@ jumps to kernel entry. Kernel takes over and prints its banner +
 | 4 | `bs->HandleProtocol(ImageHandle, &LoadedImageGuid, &out)` | ✓ |
 | 5 | Open `\boot\agnos` via SimpleFileSystem, read first 4 bytes, check ELF magic | ✓ |
 | 5b | Parse ELF64 program header, AllocatePages at `0x100000`, load 245 KB segment, verify ELF magic at load addr | ✓ |
-| 6 | GetMemoryMap into 16 KB buffer; capture map_key | ✓ |
+| 6 | Size the memory map, allocate for it, GetMemoryMap; capture map_key | ✓ |
 | 7 | Build sovereign boot-info struct, ExitBootServices, jump to kernel entry with `RDI = &boot_info` | ✓ |
 | 8 | agnos shim swap MB2→sovereign struct (cross-repo edit in agnos 1.30.0) | ✓ |
 

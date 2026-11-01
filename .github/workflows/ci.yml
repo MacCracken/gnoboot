@@ -97,6 +97,12 @@ jobs:
           QEMU_TIMEOUT: "60"
         run: sh tests/multi_ptload.sh
 
+      - name: Pre-EBS hardening gate (v0.9.0)
+        # Forces the memory-map sanity failure, and builds copies of the
+        # source that corrupt boot_info and outgrow the old 16 KB map
+        # buffer. QEMU always runs to the deadline: about 100 seconds.
+        run: sh tests/pre_ebs.sh
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

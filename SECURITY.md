@@ -29,16 +29,20 @@ gnoboot defends against:
   > coverage is worse than one that admits the gap — it stops the next
   > reader from looking.
 
-- **Firmware-misreported sizes** — `GetMemoryMap` returning a size
-  larger than our buffer (16 KB cap). Fail closed, do not silently
-  truncate. *(Audit-verified sound, S2. The buffer is declared at
-  exactly the size passed to firmware, so `EFI_BUFFER_TOO_SMALL` is
-  returned and honored rather than the map being truncated into a
-  short buffer.)*
+- **Firmware-misreported sizes** — `GetMemoryMap` reporting a size past
+  a 1 MB cap, or one that outgrows the allocated buffer. Fail closed, do
+  not silently truncate. *(Since v0.9.0 the buffer is sized by a first
+  call, closing audit F8, with the size passed to firmware exactly the
+  size allocated. Audit S2's reasoning still holds:
+  `EFI_BUFFER_TOO_SMALL` is honored rather than the map being truncated
+  into a short buffer.)*
 - **Map-key invalidation** — any unintended firmware call between
   `GetMemoryMap` and `ExitBootServices` invalidates the snapshot.
-  Path is straight-line in code; no helper functions between those
-  two calls. *(Audit-verified sound, S1, line by line.)*
+  **No firmware service runs between those two calls.** The path is
+  straight-line except for one v0.9.0 helper, `boot_info_sane`, which
+  only reads gnoboot's own memory; if it fails, EBS is abandoned, so
+  printing from there is safe. *(Audit-verified sound, S1, line by line,
+  before that helper existed; the re-audit owes it a look.)*
 - **Firmware-supplied counts** — the EFI configuration-table entry
   count, the GOP mode count, and the memory-map descriptor size are
   each bounded before use, so a firmware reporting a nonsense value
@@ -50,6 +54,8 @@ KASLR slide, gnoboot loads at a deterministic fallback base **and sets
 `boot_info` flags bit 2** so the kernel can say so. Before v0.7.0 the
 fallback base was indistinguishable at the kernel from a successful
 randomization — the security property failed silently (audit F6).
+Since v0.9.0 this also covers a CPU with no `RDRAND` at all, which used
+to fault with `#UD` in firmware instead of reaching this path.
 
 gnoboot does **not** (currently) defend against:
 

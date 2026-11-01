@@ -6,6 +6,57 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-01
+
+Pre-EBS hardening: closes audit **F8**, the two remaining M7 hooks, and the `rdrand` fault found
+at 0.8.3. Magic `'AGNO'`, struct version `2`, `struct_size 0x80` and `RDI = &boot_info` are
+untouched, and every `boot_info` field keeps its offset and type.
+
+### Changed
+
+- **`memmap_phys` now points at its own allocation on every boot.** This is the one behaviour a
+  consumer can see. The map was inside gnoboot's image; it is now in a separate `EfiLoaderData`
+  region. A consumer that stays within `memmap_count` × `memmap_entsize` is unaffected, and agnos
+  1.57.14 boots unchanged, but the spec's § 7 lifetime rule moved with it: the map now describes
+  its own pages. **This has not run on iron.**
+- **The image dropped 35,328 → 22,016 bytes**, because the 16 KB `mm_buf` is gone.
+- **`memmap_entsize` below 40 now fails at `MM`.** It was only checked for zero, and
+  `sizeof(EFI_MEMORY_DESCRIPTOR)` is 40.
+
+### Fixed
+
+- **Audit F8: the memory map can grow.** A fixed 16 KB buffer meant a machine past about 340
+  descriptors stopped at `MM` and could not boot. gnoboot now asks firmware for the size, allocates
+  that plus 8 KB of slack, and captures the map into it. There is one path for every boot rather
+  than a fallback only large maps would reach, so every boot and CI run exercises it. Reproduced
+  first: 400 fragmented allocations stop 0.8.3 at `fail @ MM`, and reach `Launching kybernet` here.
+- **A PIE load on a CPU without `RDRAND` no longer faults.** gnoboot ran `rdrand` without checking
+  CPUID, so such a CPU took `#UD` in firmware. It now checks CPUID and takes the existing
+  deterministic fallback.
+
+### Added
+
+- **Memory-map sanity check, failure code `RAM`.** Requires one free region and at least 64 MB of
+  RAM usable after EBS, checked before the handoff banner prints. It counts usable RAM, so
+  firmware's share pushes a 64 MB machine under the line and `-m 64M` is rejected; 72 MB passes.
+- **`boot_info` self-consistency check, failure code `BI`.** The last step before EBS, it asserts
+  the identity fields, the spec's "never 0" fields, the reserved flag bits, and the field pairs. It
+  only reads memory, so the map key stays valid.
+- **`tests/pre_ebs.sh`**, run in CI. Forces `RAM` with a 64 MB guest, and builds modified copies of
+  the source to force `BI` and an oversized map. Disabling either hook fails exactly its own case.
+- **`QEMU_MEM` and `QEMU_CPU` hooks in `tests/ovmf_smoke.sh`**, and a no-`RDRAND` case in
+  `tests/kaslr.sh`.
+
+### Verified
+
+Structural PASS. OVMF runtime PASS on real agnos 1.57.14. `malformed_kernel.sh` **18/18**.
+`multi_ptload.sh` PASS on ET_EXEC and PIE kernels. `pre_ebs.sh` PASS, and again under Ubuntu noble's
+`dash` and OVMF firmware. `kaslr.sh` PASS. `cyrius test`, `bench` and `fuzz` green. `cpu_has_rdrand`,
+`rdrand_u64`, the landing and the handoff tail disassembled: nothing between `mov rdi,rax` and
+`jmp rax` writes RDI. **`flags` bit 2 observed end to end for the first time:** with RDRAND off the
+kernel received `flags=0x6` and `kernel_base=0x2000000`; the RDRAND-on control got `0x2` and a slide.
+**Not run on iron.**
+
 ## [0.8.3] — 2026-11-01
 
 ET_DYN / KASLR runtime coverage. No code path in the bootloader changed and there is no ABI

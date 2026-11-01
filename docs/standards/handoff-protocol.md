@@ -67,7 +67,7 @@ The kernel owns everything from instruction one. gnoboot never regains control.
 |---|---|---|---|
 | 0 | `0x01` | `serial` | *Reserved.* Never set by any gnoboot release to date. |
 | 1 | `0x02` | `fb_present` | The `fb_*` fields (§ 4) are populated. When clear, `fb_phys` is `0` and no framebuffer was found. |
-| 2 | `0x04` | `kaslr_no_entropy` | **v0.7.0.** `RDRAND` could not supply entropy, so `kernel_base` (`0x70`) is the **deterministic fallback**, not a slide. A kernel reporting KASLR status **must** check this — a fallback base is a legal-looking slide value and is otherwise indistinguishable from a real one. |
+| 2 | `0x04` | `kaslr_no_entropy` | **v0.7.0.** `RDRAND` could not supply entropy, because it failed or (since v0.9.0) the CPU lacks it, so `kernel_base` (`0x70`) is the **deterministic fallback**, not a slide. A kernel reporting KASLR status **must** check this — a fallback base is a legal-looking slide value and is otherwise indistinguishable from a real one. |
 | 3–31 | | | **Reserved. Must be zero.** A consumer must ignore unknown bits, never reject on them. |
 
 Flags are set with read-modify-write OR. The bits are independent and may be set
@@ -91,7 +91,7 @@ always `0`, always benign, never an error.
 
 | offset | type | field | absent | since | meaning |
 |---|---|---|---|---|---|
-| `0x28` | `u64` | `memmap_phys` | never `0` | 0.1.0 | Physical base of the UEFI memory map captured immediately before `ExitBootServices`. **Points into gnoboot's own loaded image** — see § 7. |
+| `0x28` | `u64` | `memmap_phys` | never `0` | 0.1.0 | Physical base of the UEFI memory map captured immediately before `ExitBootServices`. **In its own `EfiLoaderData` allocation since 0.9.0**, previously inside gnoboot's image, so its address is not related to `boot_info`'s. A consumer that stays within `memmap_count` × `memmap_entsize` is unaffected — see § 7. |
 | `0x30` | `u32` | `memmap_count` | never `0` | 0.1.0 | Descriptor count = `MemoryMapSize / DescriptorSize`. |
 | `0x34` | `u32` | `memmap_entsize` | never `0` | 0.1.0 | `DescriptorSize` in bytes. **Use this to stride, never `sizeof(EFI_MEMORY_DESCRIPTOR)`** — UEFI explicitly permits the firmware's descriptor to be larger than the spec's structure, and stepping by the wrong stride silently walks garbage. |
 | `0x38` | `u64` | `acpi_rsdp_phys` | `0` | 0.5.0 | RSDP from the EFI Configuration Table, ACPI 2.0 GUID preferred with a 1.0 fallback. **Under UEFI the legacy EBDA / `0xE0000` scan finds nothing** — this is the only RSDP a UEFI boot has. Validate signature and checksum before trusting it. |
@@ -201,7 +201,8 @@ handoff:
 
 | region | type in the memory map | rule |
 |---|---|---|
-| `boot_info` itself, and `memmap_phys` | `EfiLoaderCode`/`EfiLoaderData` (gnoboot's PE image) | **Copy both before reclaiming loader memory.** They live inside gnoboot's image, which the kernel is otherwise free to reuse. |
+| `boot_info` itself | `EfiLoaderCode`/`EfiLoaderData` (gnoboot's PE image) | **Copy before reclaiming loader memory.** It lives inside gnoboot's image, which the kernel is otherwise free to reuse. |
+| the memory map at `memmap_phys` | `EfiLoaderData` | Since 0.9.0. **Copy or finish reading before reclaiming loader memory.** The map describes its own pages, so a kernel freeing `EfiLoaderData` while walking it frees the map underneath itself. |
 | initramfs and cmdline blobs | `EfiLoaderData` | Valid until the kernel reclaims them. **Copy or pin before freeing `EfiLoaderData`.** |
 | the kernel image | `EfiLoaderCode` | The kernel's own pages. Do not reclaim. |
 | `efi_st_phys` and runtime-services code/data | `EfiRuntimeServicesCode`/`Data` | **Never reclaim** if runtime services will be called. |

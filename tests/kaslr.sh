@@ -103,4 +103,24 @@ if [ "$b1" = "$b2" ]; then
     fi
 fi
 
+# A CPU without RDRAND must take the deterministic fallback, not fault. gnoboot
+# ran `rdrand` unchecked until v0.9.0, which was #UD on such a CPU. The fixed
+# base proves gnoboot got through and the kernel started; agnos needs RDRAND
+# itself and stops soon after, so this does not wait for the marker.
+printf '  no RDRAND expect base 0x2000000 ... '
+rc=0
+AGNOS_KERNEL="$KERNEL" EXPECT="KASLR: kernel_base=2000000" QEMU_CPU="max,rdrand=off" \
+    QEMU_TIMEOUT=20 "$ROOT/tests/ovmf_smoke.sh" >"$D/log.nordrand" 2>&1 || rc=$?
+if [ "$rc" -eq 77 ]; then
+    echo "SKIP"
+    exit 77
+fi
+if [ "$rc" -ne 0 ]; then
+    echo "FAIL"
+    sed -n '1,25p' "$D/log.nordrand" | sed 's/^/    /'
+    echo "KASLR gate: FAIL"
+    exit 1
+fi
+echo "PASS"
+
 echo "KASLR gate: PASS"

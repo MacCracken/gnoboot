@@ -98,8 +98,11 @@ chmod +w vars.fd
 # RDRAND is supported natively, so this flag is QEMU-emulation-only.
 # QEMU_TIMEOUT defaults to 20s (was 12s) — the kernel boot reaches
 # the scheduler/userland tests within ~15s; raise for slower CI.
+#
+# QEMU_MEM and QEMU_CPU exist so a gate can force a machine the bootloader
+# has to reject or survive (tests/pre_ebs.sh, tests/kaslr.sh).
 OUTPUT=$(timeout "${QEMU_TIMEOUT:-20}" qemu-system-x86_64 \
-    -machine q35 -m 256M -cpu max \
+    -machine q35 -m "${QEMU_MEM:-256M}" -cpu "${QEMU_CPU:-max}" \
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
     -drive "if=pflash,format=raw,file=vars.fd" \
     -drive "file=disk.img,format=raw" \

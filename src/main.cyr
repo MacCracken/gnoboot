@@ -21,15 +21,15 @@ include "lib/fnptr.cyr"
 
 # === UTF-16LE strings ====================================================
 
-# "gnoboot v0.8.3: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
+# "gnoboot v0.9.0: handing off to kernel\r\n\0" — 39 CHAR16 = 78 bytes; N=10 → 80.
 # Version string is hand-synced with `VERSION` + `cyrius.cyml` at every
 # release tag; see CLAUDE.md § Release Checklist. The OVMF smoke test's
 # default EXPECT matches the literal "gnoboot v<VERSION>" prefix here.
 var msg_pre[10] = {
     0x67,0x00, 0x6E,0x00, 0x6F,0x00, 0x62,0x00,    # gnob
     0x6F,0x00, 0x6F,0x00, 0x74,0x00, 0x20,0x00,    # 'oot '
-    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x38,0x00,    # 'v0.8'
-    0x2E,0x00, 0x33,0x00, 0x3A,0x00, 0x20,0x00,    # '.3: '
+    0x76,0x00, 0x30,0x00, 0x2E,0x00, 0x39,0x00,    # 'v0.9'
+    0x2E,0x00, 0x30,0x00, 0x3A,0x00, 0x20,0x00,    # '.0: '
     0x68,0x00, 0x61,0x00, 0x6E,0x00, 0x64,0x00,    # hand
     0x69,0x00, 0x6E,0x00, 0x67,0x00, 0x20,0x00,    # 'ing '
     0x6F,0x00, 0x66,0x00, 0x66,0x00, 0x20,0x00,    # 'off '
@@ -74,6 +74,9 @@ var code_ld [1] = { 0x4C,0x00, 0x44,0x00, 0x20,0x00, 0x20,0x00 };    # "LD  "  s
 var code_vfy[1] = { 0x56,0x00, 0x46,0x00, 0x59,0x00, 0x20,0x00 };    # "VFY "  post-load ELF magic re-check
 var code_mm [1] = { 0x4D,0x00, 0x4D,0x00, 0x20,0x00, 0x20,0x00 };    # "MM  "  GetMemoryMap
 var code_ebs[1] = { 0x45,0x00, 0x42,0x00, 0x53,0x00, 0x20,0x00 };    # "EBS "  ExitBootServices
+# v0.9.0 pre-EBS hooks. Both stop the boot while a message can still reach the screen.
+var code_ram[1] = { 0x52,0x00, 0x41,0x00, 0x4D,0x00, 0x20,0x00 };    # "RAM "  memory map has no free region, or under 64 MB of RAM
+var code_bi [1] = { 0x42,0x00, 0x49,0x00, 0x20,0x00, 0x20,0x00 };    # "BI  "  boot_info fails its self-consistency check
 
 # Path: UTF-16LE "\boot\agnos\0" — 12 CHAR16 = 24 bytes; N=3 → 24
 var path[3] = {
@@ -181,7 +184,7 @@ var acpi10_guid[2] = {
 #   0x10  u64   initramfs_phys   (v0.5.0: \boot\initramfs base; 0 if absent)
 #   0x18  u64   initramfs_size   (v0.5.0: initramfs byte count; 0 if absent)
 #   0x20  u64   cmdline_phys     (v0.5.0: \boot\cmdline base; 0 if absent)
-#   0x28  u64   memmap_phys      (filled at runtime: &mm_buf)
+#   0x28  u64   memmap_phys      (filled at runtime: gnoboot's AllocatePages region)
 #   0x30  u32   memmap_count     (filled at runtime: mm_size / mm_dsz)
 #   0x34  u32   memmap_entsize   (filled at runtime: mm_dsz)
 #   0x38  u64   acpi_rsdp_phys   (v0.5.0: RSDP from EFI cfg table; 0 if absent)
@@ -283,8 +286,30 @@ var boot_info[16] = {
 # rax live across the block. r8 is the retry counter: caller-saved in both
 # SysV and MS x64, and untouched by this fn's own prologue/epilogue.
 # Re-verify by disassembly after any toolchain bump (see state.md § Source).
+#
+# v0.9.0: the retry covers RDRAND failing, not RDRAND being absent. On a CPU
+# without it the instruction is #UD, which took the firmware's exception handler
+# down instead of reaching the g_rdrand_fail report above. CPUID.1:ECX bit 30
+# says whether it exists. cpuid clobbers rax, rbx, rcx and rdx, so &out moves to
+# r9 (caller-saved in both ABIs) and rbx, callee-saved in both, is pushed around
+# it. rcx is written whole, because a 32-bit ecx write zero-extends.
+fn cpu_has_rdrand() {
+    var out = 0;
+    var pout = &out;                    # rax = &out (same idiom as rdrand_u64)
+    asm {
+        0x49; 0x89; 0xC1;                           # mov r9, rax
+        0x53;                                       # push rbx
+        0xB8; 0x01; 0x00; 0x00; 0x00;               # mov eax, 1
+        0x0F; 0xA2;                                 # cpuid
+        0x5B;                                       # pop rbx
+        0x49; 0x89; 0x09;                           # mov [r9], rcx
+    }
+    return (out >> 30) & 1;
+}
+
 fn rdrand_u64() {
     var out = 0;
+    if (cpu_has_rdrand() == 0) { store64(&g_rdrand_fail, 1); return 0; }
     var pout = &out;                    # rax = &out (gnoboot's lea-into-rax idiom)
     asm {
         0x49; 0xC7; 0xC0; 0x0A; 0x00; 0x00; 0x00;   # mov r8, 10        (attempts)
@@ -317,7 +342,9 @@ var elf_hdr[8];
 var phdrs[112];
 var kfile_sz[1];          # \boot\agnos size from GetInfo — the bound for every p_offset/p_filesz
 var g_rdrand_fail[1];     # set by rdrand_u64 when RDRAND gave up → boot_info flags bit 2
-var mm_buf[2048];
+var mm_probe[1];          # sizing call's buffer: never written, the size passed is 0
+var mm_phys[1];           # the map's AllocatePages region → boot_info memmap_phys
+var mm_cap[1];            # that region's size in bytes
 var mm_size[1];
 var mm_key[1];
 var mm_dsz[1];
@@ -365,6 +392,65 @@ fn efi_fail(st, code): i64 {
     store64(&msg_fail + 32, load64(code));
     efi_print(st, &msg_fail);
     return 0;
+}
+
+# v0.9.0 memmap sanity (roadmap M7). Is there at least one free region, and at
+# least 64 MB of RAM once boot services are gone? Reads only, so it is safe at
+# any point. Stride is DescriptorSize, which the caller has already checked is
+# at least the 40 bytes read here. Stops as soon as both hold, so summing
+# firmware-supplied page counts cannot overflow, and a count with the top bit
+# set is ignored rather than subtracted.
+fn memmap_sane(): i64 {
+    var mm  = load64(&mm_phys);
+    var sz  = load64(&mm_size);
+    var dsz = load64(&mm_dsz);
+    var has_free = 0;
+    var total = 0;
+    var off = 0;
+    while (off + dsz <= sz) {
+        var ty = load32(mm + off) & 0xFFFFFFFF;
+        var np = load64(mm + off + 24);
+        var counts = 0;
+        if (ty == 1) { counts = 1; }                       # EfiLoaderCode
+        if (ty == 2) { counts = 1; }                       # EfiLoaderData
+        if (ty == 3) { counts = 1; }                       # EfiBootServicesCode
+        if (ty == 4) { counts = 1; }                       # EfiBootServicesData
+        if (ty == 7) { counts = 1; has_free = 1; }         # EfiConventionalMemory
+        if (counts == 1) { if (np > 0) { total = total + np; } }
+        if (has_free == 1) { if (total >= 16384) { return 1; } }    # 16384 pages = 64 MB
+        off = off + dsz;
+    }
+    return 0;
+}
+
+# v0.9.0 boot_info self-consistency (roadmap M7): the struct against the spec,
+# last thing before EBS. Reads only, so a pass leaves the map key valid, and a
+# failure abandons EBS, so printing from there is safe. docs/standards/
+# handoff-protocol.md § 4 owns these rules: the identity fields, the "never 0"
+# fields, the reserved flag bits, and the pairs that are both set or both clear.
+fn boot_info_sane(): i64 {
+    if ((load32(&boot_info + 0x00) & 0xFFFFFFFF) != 0x41474E4F) { return 0; }
+    if ((load32(&boot_info + 0x04) & 0xFFFFFFFF) != 2)          { return 0; }
+    if ((load32(&boot_info + 0x08) & 0xFFFFFFFF) != 0x80)       { return 0; }
+    var flags = load32(&boot_info + 0x0C) & 0xFFFFFFFF;
+    if ((flags >> 3) != 0) { return 0; }
+    var count = load32(&boot_info + 0x30) & 0xFFFFFFFF;
+    var ent   = load32(&boot_info + 0x34) & 0xFFFFFFFF;
+    if (load64(&boot_info + 0x28) == 0) { return 0; }       # memmap_phys
+    if (count == 0) { return 0; }
+    if (ent < 40)   { return 0; }
+    if (count * ent > load64(&mm_cap)) { return 0; }
+    if (load64(&boot_info + 0x40) == 0) { return 0; }       # efi_st_phys
+    if (load64(&boot_info + 0x70) == 0) { return 0; }       # kernel_base
+    var has_rd = 0;
+    var has_sz = 0;
+    if (load64(&boot_info + 0x10) != 0) { has_rd = 1; }     # initramfs_phys
+    if (load64(&boot_info + 0x18) != 0) { has_sz = 1; }     # initramfs_size
+    if (has_rd != has_sz) { return 0; }
+    var has_fb = 0;
+    if (load64(&boot_info + 0x48) != 0) { has_fb = 1; }     # fb_phys
+    if (has_fb != ((flags >> 1) & 1)) { return 0; }         # flags.fb_present
+    return 1;
 }
 
 # Load an OPTIONAL ESP file into a fresh EfiLoaderData region and report
@@ -952,10 +1038,36 @@ fn efi_main(handle, st): i64 {
     if (rsdp == 0) { rsdp = rsdp10; }                # no 2.0 → use 1.0
     if (rsdp != 0) { store64(&boot_info + 0x38, rsdp); }
 
-    # --- 11: Initial GetMemoryMap (informational; just to size the buffer) ---
-    store64(&mm_size, 16384);
-    rc = fncall5(fn_mmap, &mm_size, &mm_buf, &mm_key, &mm_dsz, &mm_dver);
+    # --- 11: Size the memory map, allocate for it, take a first copy ---
+    # Audit F8. The map used to go into a fixed 16 KB buffer in the image, so a
+    # machine past ~340 descriptors stopped at "MM" and could not boot. A
+    # zero-size call now reports what is needed. This AllocatePages changes the
+    # map, so it has to run before the GetMemoryMap that EBS depends on, and
+    # the buffer carries 8 KB of slack for the descriptors it and the banner
+    # below may add. That is plain bytes because only MemoryMapSize is
+    # guaranteed on the sizing call, not DescriptorSize. Too small still fails
+    # closed, at the final GetMemoryMap. The 1 MB cap (~20,000 descriptors)
+    # bounds a firmware-supplied size, like every other count here.
+    store64(&mm_size, 0);
+    rc = fncall5(fn_mmap, &mm_size, &mm_probe, &mm_key, &mm_dsz, &mm_dver);
+    if ((rc & 0xFF) != 5) { efi_fail(st, &code_mm); return 0; }       # EFI_BUFFER_TOO_SMALL
+    var mm_need = load64(&mm_size);
+    if (mm_need < 1)        { efi_fail(st, &code_mm); return 0; }
+    if (mm_need > 0x100000) { efi_fail(st, &code_mm); return 0; }
+    var mm_pages = (mm_need + 0x2000 + 0xFFF) / 0x1000;
+    store64(&mm_phys, 0);
+    rc = fncall4(fn_alloc, 0, 2, mm_pages, &mm_phys);                 # AllocateAnyPages, EfiLoaderData
+    if (rc != 0) { efi_fail(st, &code_ap); return 0; }
+    store64(&mm_cap, mm_pages * 0x1000);
+
+    store64(&mm_size, load64(&mm_cap));
+    rc = fncall5(fn_mmap, &mm_size, load64(&mm_phys), &mm_key, &mm_dsz, &mm_dver);
     if (rc != 0) { efi_fail(st, &code_mm); return 0; }
+    # On this map rather than the final one, so a machine that fails stops before
+    # the banner below says it is handing off. The dsz bound is what makes the
+    # 40-byte reads in memmap_sane safe.
+    if (load64(&mm_dsz) < 40) { efi_fail(st, &code_mm); return 0; }
+    if (memmap_sane() == 0) { efi_fail(st, &code_ram); return 0; }
 
     # --- Announce we're about to hand off (last text from gnoboot) ---
     # ClearScreen first so the banner lands on a fresh framebuffer
@@ -965,7 +1077,7 @@ fn efi_main(handle, st): i64 {
 
     # --- Fill sovereign boot-info dynamic fields ---
     store64(&boot_info + 0x40, st);                    # efi_st_phys
-    store64(&boot_info + 0x28, &mm_buf);               # memmap_phys
+    store64(&boot_info + 0x28, load64(&mm_phys));      # memmap_phys
 
     # --- 12: Refresh GetMemoryMap RIGHT BEFORE ExitBootServices. Any
     #         firmware service called between GetMemoryMap and EBS may
@@ -973,18 +1085,22 @@ fn efi_main(handle, st): i64 {
     #         above almost certainly did. The fresh call returns a valid
     #         mm_key for the EBS that follows. No firmware service may
     #         be called between this point and the EBS call below. ---
-    store64(&mm_size, 16384);
-    rc = fncall5(fn_mmap, &mm_size, &mm_buf, &mm_key, &mm_dsz, &mm_dver);
+    store64(&mm_size, load64(&mm_cap));
+    rc = fncall5(fn_mmap, &mm_size, load64(&mm_phys), &mm_key, &mm_dsz, &mm_dver);
     if (rc != 0) { efi_fail(st, &code_mm); return 0; }
 
     var sz  = load64(&mm_size);
     var dsz = load64(&mm_dsz);
     # v0.7.0 (audit F9): DescriptorSize is firmware-supplied and divides
     # sz on the next line. Zero would fault here — pre-EBS, so failing
-    # loud at "MM" is both possible and correct.
-    if (dsz < 1) { efi_fail(st, &code_mm); return 0; }
+    # loud at "MM" is both possible and correct. Re-checked because this is
+    # a new call: the 40 is sizeof(EFI_MEMORY_DESCRIPTOR).
+    if (dsz < 40) { efi_fail(st, &code_mm); return 0; }
     store32(&boot_info + 0x30, sz / dsz);              # memmap_count
     store32(&boot_info + 0x34, dsz);                   # memmap_entsize
+
+    # Reads only: the map key is still valid after this. A failure abandons EBS.
+    if (boot_info_sane() == 0) { efi_fail(st, &code_bi); return 0; }
 
     # --- 13: ExitBootServices — POINT OF NO RETURN ---
     var key = load64(&mm_key);

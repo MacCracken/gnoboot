@@ -3,17 +3,21 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
-> **Last refresh**: 2026-11-01 (**v0.8.3 cut** — ET_DYN / KASLR runtime coverage: `tests/kaslr.sh` and `tests/build_pie_agnos.sh`, a release-cut gate. One image byte moved. Found gnoboot runs `rdrand` without a CPUID check. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.8.2 cut** — real boot gates in CI: OVMF `_4M` paths, a pinned agnos kernel, SKIP exits 77, and a banner-vs-`VERSION` check. One image byte moved. All local gates green plus a runner simulation; awaiting user tag and the first real CI run, not iron-tested). Prior: 2026-11-01 (**v0.8.1 cut** — pin `6.7.9` → `6.7.18`, **measured inert**: the compiler-only build is byte-identical to 0.8.0; the version bump is one byte. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.8.0 cut** — pin `6.6.20` → `6.7.9`, **measured inert**: the compiler-only build is byte-identical to 0.7.3; the version bump is two bytes. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.7.3 cut** — pin `6.6.2` → `6.6.20`, **not inert**: image 37,376 → 35,328 bytes; version bump itself one byte at `0x401A`. Fixed the banner 0.7.2 left at `v0.7.1`. `stdlib = ["fnptr"]` commented out to work around a cyrius bug. All local gates green; awaiting user tag, not iron-tested. Found CI's boot gates SKIP). Prior: 2026-09-11 (**v0.7.2 cut** — pin `6.5.36` → `6.6.2`; this file was not refreshed at that cut, the entry below was backfilled at v0.7.3). Prior: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
+> **Last refresh**: 2026-11-01 (**v0.9.0 cut** — pre-EBS hardening: audit F8 closed by two-call memory-map sizing, `RAM` and `BI` hooks, CPUID check before `rdrand`, `tests/pre_ebs.sh` in CI. `memmap_phys` moved to its own allocation, and the image dropped to 22,016 bytes. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.8.3 cut** — ET_DYN / KASLR runtime coverage: `tests/kaslr.sh` and `tests/build_pie_agnos.sh`, a release-cut gate. One image byte moved. Found gnoboot runs `rdrand` without a CPUID check. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.8.2 cut** — real boot gates in CI: OVMF `_4M` paths, a pinned agnos kernel, SKIP exits 77, and a banner-vs-`VERSION` check. One image byte moved. All local gates green plus a runner simulation; awaiting user tag and the first real CI run, not iron-tested). Prior: 2026-11-01 (**v0.8.1 cut** — pin `6.7.9` → `6.7.18`, **measured inert**: the compiler-only build is byte-identical to 0.8.0; the version bump is one byte. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.8.0 cut** — pin `6.6.20` → `6.7.9`, **measured inert**: the compiler-only build is byte-identical to 0.7.3; the version bump is two bytes. All local gates green; awaiting user tag, not iron-tested). Prior: 2026-11-01 (**v0.7.3 cut** — pin `6.6.2` → `6.6.20`, **not inert**: image 37,376 → 35,328 bytes; version bump itself one byte at `0x401A`. Fixed the banner 0.7.2 left at `v0.7.1`. `stdlib = ["fnptr"]` commented out to work around a cyrius bug. All local gates green; awaiting user tag, not iron-tested. Found CI's boot gates SKIP). Prior: 2026-09-11 (**v0.7.2 cut** — pin `6.5.36` → `6.6.2`; this file was not refreshed at that cut, the entry below was backfilled at v0.7.3). Prior: 2026-08-29 (**v0.7.1 cut** — pin `6.5.35` → `6.5.36` (**measured: zero emitted bytes changed**; `lib/fnptr.cyr` byte-identical between the two snapshots, `fncall2` body included), roadmap **M4** shipped as [`docs/standards/handoff-protocol.md`](../standards/handoff-protocol.md), and the one live bug writing that spec exposed: **`fb_mode_chosen` at `0x6C` overlapped `fb_size`'s u64 at `0x68` and was destroyed on every boot since v0.6.1** — always read `0`. Relocated to `0x78`; struct grew 120 → 128 bytes, `version` unchanged at 2. All four gates green. Awaiting user tag). Prior: 2026-08-29 (**v0.7.0 cut** — *ELF-load hardening*, closing audit F1–F4/F6/F7/F9 and merging M5+M7; `malformed_kernel.sh` 18/18 and `multi_ptload.sh` PASS). Prior: 2026-08-29 (**pre-1.0 security audit** — [`docs/audit/2026-08-29-audit.md`](../audit/2026-08-29-audit.md), 10 findings / 9 verified-sound; no code changed in that pass). Prior: 2026-08-26 (**v0.6.2 cut** — toolchain pin-bump patch release: `cyrius.cyml` pin `6.2.44` → `6.5.35`, `lib/fnptr.cyr` re-vendored from the matching stdlib snapshot (comment-only), banner `v0.6.1` → `v0.6.2`. Measured: pre- and post-bump trees built under the same compiler differ in **exactly one byte** — the banner's patch digit. Structural + OVMF gates green; handoff sequence re-disassembled because 6.5.35 is a regalloc release; **tagged `0.6.2` at `741e935`**). 2026-08-03 (**v0.6.1 cut** — native-resolution GOP mode selection via `QueryMode`/`SetMode`, `boot_info` 0x6C `fb_mode_chosen`, and the `ovmf_smoke.sh` `EXPECT` fix that made the banner gate derive from `VERSION`). 2026-06-27 (**v0.6.0 cut** — full-binary KASLR / ET_DYN PIE kernel load, `boot_info` 0x70 `kernel_base`, pin `6.2.24` → `6.2.44`). 2026-06-19 (**v0.5.1 cut** — pin-bump patch release `6.0.47` → `6.2.24`). 2026-06-03 (**v0.5.0 cut** — the `boot_info` feature-fill release: `initramfs_phys`/`size` + `cmdline_phys` + `acpi_rsdp_phys` populated pre-EBS, all optional + benign-on-failure). 2026-06-01 (Open-section reconcile to the agnos 1.40.x reality). 2026-05-28 (v0.4.3 — pin bump to 6.0.14).
 
 ## Version
 
-**0.8.3** — cut 2026-11-01 (awaiting user tag). ET_DYN / KASLR runtime coverage. No
-bootloader code changed and no ABI change: one image byte, `0x401A`.
+**0.9.0** — cut 2026-11-01 (awaiting user tag). Pre-EBS hardening. No ABI change:
+every `boot_info` field keeps its offset and type.
 
-The PIE branch now has real results (§ Verified), and `tests/kaslr.sh` guards it at
-release cuts. **⚠ Running it found one bug:** gnoboot executes `rdrand` without
-checking CPUID, so a PIE load on a CPU without RDRAND faults with `#UD`. Nothing
-shipping hits it. See § Open.
+**⚠ The thing worth knowing about this cut: `memmap_phys` moved on every boot**, from
+inside gnoboot's image to its own `EfiLoaderData` allocation. agnos handles that:
+it reserves every non-conventional region, reads the map without reusing its pages,
+and the region lands next to gnoboot's own image (`0xe07d000` under OVMF). But that
+is the one change here QEMU cannot vouch for. **Burn it.**
+
+Prior — **0.8.3** — cut 2026-11-01, tagged `0.8.3`. ET_DYN / KASLR runtime coverage,
+and the `rdrand` fault that 0.9.0 fixed. No bootloader code changed and no ABI change.
 
 Prior — **0.8.2** — cut 2026-11-01, tagged `0.8.2`. Real boot gates in CI, proven by
 a real run (§ CI / Release). No bootloader code changed and no ABI change.
@@ -261,11 +265,10 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
 
 ## Binary
 
-- **`build/BOOTX64.EFI`**: 35,328 bytes at v0.8.3, unchanged since v0.7.3 (37,376
-  before that). The 2 KB drop was cyrius 6.6.16 baking byte lists into the image.
-  The v0.8.3 version bump is **exactly one byte** against the same-compiler build:
-  file offset `0x401A`, the banner's patch digit (`0x4016` is the minor digit). PE32+
-  EFI Application, x86_64, subsystem 0x000A,
+- **`build/BOOTX64.EFI`**: 22,016 bytes at v0.9.0 (was 35,328). The 13 KB drop is
+  the 16 KB `mm_buf` leaving the image, less the new code. The banner's minor and
+  patch digits are at file offsets `0x4C16` and `0x4C1A`. PE32+ EFI Application,
+  x86_64, subsystem 0x000A,
   `DllCharacteristics` 0x0140 = NX_COMPAT + DYNAMIC_BASE, `.reloc` populated.
 - **`.rdata` is writable** (`0xC0000040`, R+W, no X) and holds gnoboot's globals
   despite the name, so `efi_fail`'s in-place patch of `msg_fail` still works
@@ -286,16 +289,17 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
   goes through `mov rsp,r13; ret`.
 - **Banner storage note** ⚠ reversed at v0.7.3. `var foo[N] = { ... }` byte
   lists are now a contiguous blob in `.rdata`: the banner is at file offset
-  `0x4000`, `msg_fail` at `0x4050`, and `boot_info` at `0x41D0`. So the `AGNO`
+  `0x4C00`, `msg_fail` at `0x4C50`, and `boot_info` at `0x4DE0`. So the `AGNO`
   magic is **data**, not an immediate; searching a disassembly for `0x41474e4f`
   finds nothing. `tests/verify_pe.sh` checks the banner this way since v0.8.2,
   though the OVMF gate is still what proves it prints.
 
 ## Source
 
-- `src/main.cyr` — single file, ~1,020 lines (740 before the v0.7.0
+- `src/main.cyr` — single file, ~1,130 lines (740 before the v0.7.0
   hardening). UTF-16LE message constants (one `msg_pre` banner + one
-  shared `msg_fail` template + **17** per-stage `code_*` codes — v0.7.0
+  shared `msg_fail` template + **19** per-stage `code_*` codes — v0.9.0 added
+  `RAM` / `BI`, v0.7.0
   added `GI` / `PHN` / `SZ` / `SHR`), EFI GUIDs (LoadedImage + SimpleFileSystem
   + GraphicsOutput + FileInfo + ACPI 2.0/1.0), helpers `efi_print` /
   `efi_clear` / `efi_fail` / `load_esp_blob` / `guid_eq` / `rdrand_u64`,
@@ -313,11 +317,16 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
     - `efi_main` tail: `var p = &boot_info;` → `movabs rax, &boot_info`,
       then asm `mov rdi, rax`, then `var jt = kernel_jump_target;` must be
       a plain `mov rax,[rbp-N]` that **does not touch RDI**, then asm
-      `jmp rax`. Re-confirmed at the **v0.7.3** cut: `mov rdi,rax` →
-      `mov rax,[rbp-0x198]` → `mov [rbp-0x3a0],rax` → `jmp rax`. The extra
+      `jmp rax`. Re-confirmed at the **v0.9.0** cut: `mov rdi,rax` →
+      `mov rax,[rbp-0x198]` → `mov [rbp-0x3c0],rax` → `jmp rax`. The extra
       store is `jt`'s own stack slot — it writes the stack, never RDI.
-    - `rdrand_u64` was re-confirmed at the same cut, unchanged. Since 6.6.5 the
-      landing is a third thing to check: see **Entry** in § Binary.
+    - `cpu_has_rdrand` (v0.9.0): same lea-into-rax idiom, then `mov r9,rax` /
+      `push rbx` / `mov eax,1` / `cpuid` / `pop rbx` / `mov [r9],rcx`. `cpuid`
+      clobbers rax, rbx, rcx and rdx, so `&out` must survive in `r9`, and rbx is
+      callee-saved. Confirmed at the cut.
+    - `rdrand_u64` was re-confirmed at the same cut: the CPUID check sits before
+      `var pout = &out`, so the lea still immediately precedes the block. Since
+      6.6.5 the landing is another thing to check: see **Entry** in § Binary.
 - `var foo[N]` sizes are in **u64 slots** — `N` × 8 bytes, not `N` bytes.
   `msg_pre[10]` = 80 bytes and the banner uses all 80. A version string
   one character longer (e.g. `0.6.9` → `0.6.10`) needs `N = 11`.
@@ -341,9 +350,16 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
   exits by itself, so every boot takes its full deadline.
 - `tests/fetch_agnos.sh` — downloads the `agnos-x86_64` release asset and checks
   it against `SHA256SUMS`. The version is pinned in `tests/AGNOS_VERSION`.
+- `tests/pre_ebs.sh` — **v0.9.0 gate, in CI.** Forces `RAM` with a 64 MB guest, and
+  builds modified copies of the source to force `BI` and a map past the old 16 KB.
+  Every edit must match exact source text or the gate fails, and the map-growth
+  copy stops at `BI` if the map did not actually outgrow 16 KB. Disabling either
+  hook fails exactly its own case. Reword the anchored lines and this gate will
+  say so. `QEMU_MEM` and `QEMU_CPU` in `ovmf_smoke.sh` exist for these gates.
 - `tests/kaslr.sh` — **v0.8.3 gate, release-cut only.** Boots a PIE kernel and
   asserts each boot lands in the slide window, 2 MB-aligned, reaches `Launching
   kybernet`, and that the base varies, with a third boot to settle a 1-in-111 tie.
+  Since v0.9.0 it also asserts a CPU without RDRAND takes the fixed 32 MB base.
   Mutation-tested: fails on a stuck slide, no slide, a misaligned slide and an
   unslid entry. It trusts the kernel's echo of `kernel_base`, so it cannot see a
   gnoboot that misreports the address. Default deadline 60 s per boot.
@@ -377,8 +393,9 @@ writes a `cyrius.lock`; delete it, since the dep it pins is undeclared again.
   build with `CYRIUS_TARGET_EFI=1`, run the structural gate, fetch the
   pinned agnos kernel, run all three boot gates against it, upload
   `BOOTX64.EFI` as artifact. **Proven at `55e8688`**: OVMF smoke 21 s,
-  malformed-kernel 223 s, multi-`PT_LOAD` 120 s, all passing. **A step taking
-  0 seconds means a gate did not boot.** `tests/kaslr.sh` is not wired in: the
+  malformed-kernel 223 s, multi-`PT_LOAD` 120 s, all passing. `tests/pre_ebs.sh`
+  joined at v0.9.0, about 100 s, not yet seen on GitHub. **A step taking 0 seconds
+  means a gate did not boot.** `tests/kaslr.sh` is not wired in: the
   agnos release asset is ET_EXEC, so CI coverage of the PIE branch would need agnos
   to publish a PIE asset. It runs at release cuts instead.
 - `.github/workflows/release.yml` — `v?X.Y.Z` tag trigger. CI gate,
@@ -411,7 +428,8 @@ has `fnptr` there, because `fnptr` is its only dep. Any line in between (even a
 blank one) avoids it, and reordering is not available with one dep.
 
 The workaround costs nothing at build time: `--no-deps` and the undeclared form
-produce the same image. What it costs is the automatic re-vendor, so see
+produce the same image. Each build prints a harmless note that `lib/fnptr.cyr` is
+outside the declared footprint; ignore its advice to delete the file. What it costs is the automatic re-vendor, so see
 § Toolchain before touching `lib/`. Tracked in the roadmap.
 
 **The test target builds again** (it did not through v0.7.1). `cyrius test`,
@@ -431,12 +449,9 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
   *"security audit pass"* criterion; **no code changed in that pass** — it is the
   scoping document for v0.7.0.
 - **Disposition — v0.7.0 (2026-08-29) closed F1, F2, F3, F4, F6, F7, F9 and
-  the F5 comment**, and reconciled `SECURITY.md`. Remaining open: **F8**
-  (16 KB memmap buffer cannot grow — safe, brittle at >~340 descriptors;
-  deferred because the sizing `AllocatePages` must precede the final
-  `GetMemoryMap` or it invalidates the map key) and the **F5 decision**
-  (flat struct vs. a real tag stream — M4's first task). F10 was
-  informational, no action.
+  the F5 comment**, and reconciled `SECURITY.md`. v0.7.1 settled the **F5
+  decision** (flat, no tag stream), and **v0.9.0 closed F8**. F10 was
+  informational, no action. No audit finding remains open.
 - **Re-run the audit after v0.7.0** before the v1.0 cut: the criterion is
   satisfied by having a pass, but the *sub-claims* changed materially, and
   the ET_DYN path has only had runtime coverage since v0.8.3.
@@ -493,6 +508,20 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
 
 ## Verified
 
+- **v0.9.0 gates** (QEMU OVMF, 2026-11-01, **not yet in CI**): image
+  `76999a8255768d5c…`. Structural PASS. OVMF runtime PASS on real agnos 1.57.14.
+  `malformed_kernel.sh` **18/18**. `multi_ptload.sh` **PASS** on ET_EXEC and PIE.
+  `pre_ebs.sh` **PASS**, and again under Ubuntu noble's `dash` and OVMF firmware.
+  `kaslr.sh` **PASS**. `cyrius test`, `bench`, `fuzz` green. Measured:
+  - **F8 was real.** 400 fragmented allocations stop 0.8.3 at `fail @ MM` and reach
+    `Launching kybernet` on 0.9.0.
+  - **`RAM`** counts RAM usable after EBS, so `-m 64M` is rejected and 72 MB passes,
+    on both Arch's and Ubuntu's OVMF. OVMF itself does not reach gnoboot at 48 MB.
+  - **`flags` bit 2, observed end to end.** With RDRAND off, guest memory shows the
+    kernel received `flags=0x6` and `kernel_base=0x2000000`. The RDRAND-on control
+    got `0x2` and a slide. Exhausting the retries still cannot be forced under QEMU,
+    but absence reaches the same report.
+  - **Normal map:** 111–120 descriptors of 48 bytes, at `0xe07d000`/`0xde30000`.
 - **v0.8.3 gates** (QEMU OVMF, 2026-11-01): image `ff75bf9f25b902e3…`, two builds
   reproduce it. Structural PASS. OVMF runtime PASS on real agnos 1.57.14.
   `malformed_kernel.sh` **18/18**. `multi_ptload.sh` **PASS**. `kaslr.sh` **PASS**.
@@ -514,8 +543,8 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
     128 MB the panic RIP was `base + 0x1A9719` on all five bases.
   - **Boot time follows host load, not the base.** The same base took 16.1 s and
     8.0 s, at a load average near 12.
-  - **Not covered:** RDRAND exhausting its retries, which sets `flags` bit 2. QEMU's
-    RDRAND does not fail. The PIE path has also never run on iron.
+  - **Not covered:** RDRAND exhausting its retries, because QEMU's RDRAND does not
+    fail. The PIE path has also never run on iron.
 - **v0.8.2 gates** (QEMU OVMF, 2026-11-01; **CI proven at `55e8688`**): image `bf67a12de112a358…`.
   Local: structural PASS, OVMF runtime PASS on real agnos 1.57.14,
   `malformed_kernel.sh` **18/18**, `multi_ptload.sh` **PASS**, `cyrius test`, `bench`,
@@ -547,8 +576,9 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
   the handoff tail; nothing between `mov rdi,rax` and `jmp rax` writes RDI. `boot_info`
   header read from the image: `0x41474E4F`, version 2, `struct_size` `0x80`.
 - ⚠ **No release since the 6.6.5 entry change is iron-validated** (v0.7.3 through
-  v0.8.1), and that matters more than usual: it changed the sequence every firmware
-  call runs under, and
+  v0.9.0), and that matters more than usual. v0.9.0 also moved the memory map, the
+  first thing the kernel reads after entry. The entry change altered the sequence
+  every firmware call runs under, and
   cyrius's own notes say OVMF tolerates a misaligned CALL. **Run it on the next
   agnos burn.**
 - **v0.7.1 gates** (QEMU OVMF, 2026-08-29): build clean under cyrius 6.5.36 with
@@ -596,20 +626,6 @@ this path — `verify_pe.sh` and `ovmf_smoke.sh` both work off
   only meaningful once the kernel reads them — see Open).
 
 ## Open
-
-- **gnoboot executes `rdrand` without checking CPUID.** Found at the v0.8.3 cut with
-  `-cpu max,rdrand=off`: a PIE load faults with `#UD` at gnoboot's own `rdrand`
-  (image offset `0x1594`). The v0.7.0 retry covers RDRAND failing, not being absent,
-  so this is a crash rather than the loud `flags` bit 2 fallback. ET_EXEC kernels
-  never reach it and agnos needs RDRAND itself, so nothing shipping hits it. The
-  fix touches `rdrand_u64`, one of the hand-verified idioms. Slotted for 0.9.0.
-- **Audit F8 — the memory map cannot grow.** `mm_buf` is a fixed 16 KB and the
-  size passed to `GetMemoryMap` matches it exactly, so it fails *closed* rather
-  than truncating (audit S2, sound). But a machine whose map exceeds ~340
-  descriptors simply will not boot, reporting only `MM`. The fix is UEFI's
-  two-call sizing pattern, with the ordering constraint that the sizing
-  `AllocatePages` must run **before** the final `GetMemoryMap` or it invalidates
-  the map key. Deferred from v0.7.0; not a correctness bug.
 
 - **boot_info feature-fill — LANDED at v0.5.0 (gnoboot side).** gnoboot now
   fills `initramfs_phys`/`size` (0x10/0x18) from `\boot\initramfs`,
