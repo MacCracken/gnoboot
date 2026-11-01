@@ -6,6 +6,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-11-01
+
+Toolchain pin bump, `6.7.9` → `6.7.18`, the latest release. No ABI change: magic `'AGNO'`,
+struct version `2`, `struct_size 0x80` and `RDI = &boot_info` are untouched.
+
+**Measured inert.** The unchanged source under 6.7.18, with `lib/fnptr.cyr` re-vendored, builds
+the 0.8.0 image byte for byte (35,328 bytes, `bf2ac65f…`). The version bump then moves exactly
+**one byte**: file offset `0x401A`, the banner's patch digit.
+
+### Changed
+
+- **Toolchain `6.7.9` → `6.7.18`.** The UEFI mentions in the cyrius CHANGELOG for this range are
+  all its own test infrastructure. Pin, `~/.cyrius/current` and latest-published now agree.
+- **`lib/fnptr.cyr` re-vendored from the 6.7.18 snapshot.** Comment-only delta; all nine bodies
+  stay unreachable.
+
+### Known issues
+
+- **`stdlib = ["fnptr"]` stays commented out.** The declared form still fails at 6.7.18 with
+  `reserved intrinsic name 'fncall0'`.
+- **CI's three boot gates still SKIP and report success.** Everything below was run locally.
+
+### Verified
+
+Structural PASS. OVMF runtime PASS booting real agnos 1.57.14. `malformed_kernel.sh` **18/18**.
+`multi_ptload.sh` PASS. `cyrius test`, `bench` and `fuzz` green. `ud2 ud2` clean. The disassembly
+results from 0.7.3 carry over because the code is byte-identical. **Not run on iron.**
+
 ## [0.8.0] — 2026-11-01
 
 Toolchain pin bump, `6.6.20` → `6.7.9`. No ABI change: magic `'AGNO'`, struct version `2`,
