@@ -4,6 +4,27 @@
 > lives in [`state.md`](state.md); this file is the sequencing — what
 > ships, in what order, against what dependency gates.
 
+## Moving the cyrius pin to 6.6.5
+
+Nothing breaks at this bump. cyrius 6.6.5 is not tagged yet, and
+nothing below can land against the pin until it is. The pin is 6.6.2
+today, and this section lists only what 6.6.5 itself changes.
+
+- [ ] The UEFI firmware calls through `fncallN` (`src/main.cyr`, e.g.
+      `efi_print` at `:347`) ran with rsp 8 bytes off 16-byte alignment
+      on ≤ 6.6.4. 6.6.5 seeds the UEFI entry's alignment (efi_main
+      trampoline frame `0x20`, was `0x28`), parks the entry rsp in `r13`
+      and restores it before the firmware `ret`, and reserves `r13`
+      (with `r14`/`r15`) from the register allocator. Re-verify by
+      disassembly after the bump, as the *hand-verified codegen idioms*
+      note in `state.md` (`:230-233`) already requires. See the cyrius
+      CHANGELOG [6.6.5] entry
+      "rsp was 8 bytes off 16-byte alignment at every call emitted inside
+      an expression".
+- [ ] At the bump, re-run `cyrius deps` — the aarch64 syscall peer moved
+      SYS_UNLINKAT 35 → 263, so an un-re-vendored peer's sys_unlink would
+      run nanosleep.
+
 ## v1.0 criteria
 
 v1.0 freezes the gnoboot handoff contract + the firmware-to-kernel
@@ -430,3 +451,45 @@ with AGNOS as the canonical consumer.
 - **Self-modification at runtime** — gnoboot's binary is read-only after
   firmware loads it. Configuration via `/boot/gnoboot.cfg` (text file on
   ESP), not via patching gnoboot itself.
+
+---
+
+## Moving the cyrius pin to 6.6.6
+
+**Current pin: `cyrius = "6.6.2"`** — four releases behind. Nothing must change first;
+this is a pin bump and a rebuild.
+
+**What was checked** (the two `.cyr` in `src/`: `main.cyr` and `test.cyr`):
+
+- **Windows write corruption: structurally impossible here.** gnoboot has **zero**
+  `O_APPEND` / `O_TRUNC` anywhere — not even in `lib/`, because `[deps] stdlib = ["fnptr"]`
+  vendors one module and the file-I/O stdlib is not part of the build. gnoboot reaches the
+  ESP through UEFI `SimpleFileSystem` protocol calls, not POSIX opens, so none of the PE
+  open-flag work (append, truncate, access mode, `file_exists`/`file_read_all` dropping
+  write access) reaches this repo either way.
+- **The 6.6.6 `--target=js` and `cyrius pulsar` refusals do not affect the build.** gnoboot
+  selects its output with `CYRIUS_TARGET_EFI=1` before `cyrius build`, which is untouched.
+- **No shape the new refusals catch.** Zero `struct` declarations, no struct/vector copies,
+  no by-value struct parameters, no `async fn`, no `operator` fn, no SIMD-returning fn, no
+  fn mixing pair and scalar returns, no `var` inside a top-level block (zero top-level `{` /
+  `if (` / `while (` at column 0), no raw `SYS_STATFS`, no `lib/regression.cyr` consumer,
+  no `vec_*` of gnoboot's own, no symlink in `lib/`.
+- ⚠ **Not to be confused:** `docs/architecture/003-ms-x64-firmware-call-abi.md` is about the
+  **MS x64 calling convention UEFI firmware requires**, not about a Windows target.
+  `BOOTX64.EFI` *is* a PE32+ image (`tests/verify_pe.sh` checks that), but that is the UEFI
+  container, not `CYRIUS_TARGET_WIN`: gnoboot never links the Windows file-API layer where
+  6.6.6's `O_APPEND` / `O_TRUNC` / access-mode fixes live, and carries no
+  `CYRIUS_TARGET_WIN` branch. So the Win64 half of 6.6.6 is not gnoboot's concern — but the
+  MS x64 call path is worth a re-run of the OVMF smoke after the bump anyway, because 6.6.5
+  corrected three wrong **ENTRY stack bases**, one of them UEFI's.
+
+**What it gains: the UEFI entry-base fix is the headline for this repo.** 6.6.5 found the
+PE, UEFI and x86 Mach-O entry bases each mis-aligned; a bootloader that calls firmware
+functions under the MS x64 ABI is precisely the consumer that cares. Plus 6.6.3's
+`#inline`-disarms-`#derive` fix, 6.6.4's ≥64 KB string-literal fix, and 6.6.6's nine new
+refusals.
+
+**Verify after bumping:** `cyrius deps` → `CYRIUS_TARGET_EFI=1 cyrius build` →
+`tests/ovmf_smoke.sh` end-to-end (banner → `HandleProtocol` → ELF load → `GetMemoryMap` →
+`ExitBootServices` → kernel entry with `RDI = &boot_info`). A structural gate passing is not
+this — run OVMF. Given the entry-base change, do not accept "it compiled" as the result.
